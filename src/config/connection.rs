@@ -19,18 +19,29 @@ pub struct DB {
 }
 
 impl DB {
-    pub fn new(&self) -> DB {
+    pub fn new(
+        url: String,
+        user: String,
+        password: String,
+        host: String,
+        port: i64,
+        name: String,
+        max_connection: i64,
+        min_connection: i64,
+        acquired_timout: i64,
+        idle_timout: i64,
+    ) -> DB {
         DB {
-            url: self.url.clone(),
-            user: self.user.clone(),
-            password: self.password.clone(),
-            host: self.host.clone(),
-            name: self.name.clone(),
-            port: self.port,
-            max_connection: self.max_connection,
-            min_connection: self.min_connection,
-            acquired_timout: self.acquired_timout,
-            idle_timout: self.idle_timout,
+            url: url,
+            user: user,
+            password: password,
+            host: host,
+            name: name,
+            port: port,
+            max_connection: max_connection,
+            min_connection: min_connection,
+            acquired_timout: acquired_timout,
+            idle_timout: idle_timout,
         }
     }
 }
