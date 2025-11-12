@@ -15,15 +15,44 @@ This repository is a small Rust project scaffold intended as the starting point 
 ## Quick start
 
 1. Clone the repository and change into the project directory.
-2. Build the project:
 
-```bash
-cd {your_path}/example-axum-api
-cargo build
-```
+   ```bash
+   cd {your_path}/example-axum-api
+   ```
 
-3. Run the project (if a main is provided):
+- install crate `sqlx-cli`
+  ```bash
+  cargo install sqlx-cli
+  ```
 
-```bash
-cargo run
-```
+- create dev.toml file, then inside toml file
+  ```bash
+  name = "development"
+  
+  [database]
+  url="postgres://{user_name}:{password}@{host}:{port}/{database_name}"
+  host = {host}
+  port = {port}
+  user = {user_name}
+  password = {password}
+  name = {database_name}
+  max_connection = 10
+  min_connection = 5
+  acquire_timeout = 5
+  idle_timeout = 60
+  ```
+
+- then export url 
+  unix/linux
+  ```bash
+  export DATABASE_URL=$(awk -F'"' '/url=/ {print $2}' dev.toml)
+  ```
+  windows
+  ```bash
+  set DATABASE_URL=$(awk -F'"' '/url=/ {print $2}' dev.toml)
+  ```
+
+- create new database
+  ```bash
+  sqlx database create
+  ```
