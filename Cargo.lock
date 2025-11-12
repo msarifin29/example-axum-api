@@ -606,6 +606,7 @@ dependencies = [
  "config",
  "futures",
  "http",
+ "log",
  "log4rs",
  "serde",
  "sqlx",

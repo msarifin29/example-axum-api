@@ -2,6 +2,8 @@ use config::{Config, ConfigError, File, FileFormat};
 use sqlx::{Error, Pool, Postgres, postgres::PgPoolOptions};
 use std::{result::Result::Ok, time::Duration};
 
+use crate::config::logger::{LogMsg, Logger};
+
 #[derive(Debug)]
 pub struct DB {
     pub url: String,
@@ -45,6 +47,10 @@ impl ConnectionBuilder {
         match builder {
             Ok(build) => Ok(build),
             Err(error) => {
+                Logger::init();
+                let log = Logger;
+                let msg = format!("Failed to execute environment : {:?}", error);
+                log.err(&msg);
                 panic!("Failed to execute environment : {:?}", error)
             }
         }
@@ -69,6 +75,10 @@ impl Connection for DB {
         match result {
             Ok(v) => Ok(v),
             Err(e) => {
+                Logger::init();
+                let log = Logger;
+                let msg = format!("Failed to connect into database : {:?}", e);
+                log.err(&msg);
                 panic!("Failed to connect into database : {}", e)
             }
         }

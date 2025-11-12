@@ -1,0 +1,12 @@
+appenders:
+  output_file:
+    kind: file
+    path: logger/error/error.log
+    append: true
+
+root:
+  level: error
+  appenders:
+    - output_file
+
+loggers: {}
