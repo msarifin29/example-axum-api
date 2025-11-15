@@ -96,10 +96,29 @@ impl Connection for DB {
     }
 }
 
+pub async fn pg_test() -> Result<Pool<Postgres>, Error> {
+    let con = ConnectionBuilder::build("dev.toml").unwrap();
+
+    let db: DB = DB {
+        url: con.get_string("database.url").unwrap(),
+        user: con.get_string("database.user").unwrap(),
+        name: con.get_string("database.name").unwrap(),
+        host: con.get_string("database.host").unwrap(),
+        port: con.get_int("database.port").unwrap(),
+        password: con.get_string("database.password").unwrap(),
+        max_connection: con.get_int("database.max_connection").unwrap(),
+        min_connection: con.get_int("database.min_connection").unwrap(),
+        acquired_timout: con.get_int("database.acquire_timeout").unwrap(),
+        idle_timout: con.get_int("database.idle_timeout").unwrap(),
+    };
+    let pool = Connection::pool(&db).await?;
+    Ok(pool)
+}
+
 #[cfg(test)]
 mod tests {
 
-    use crate::config::connection::{Connection, ConnectionBuilder, DB};
+    use crate::config::connection::{Connection, ConnectionBuilder, DB, pg_test};
     use sqlx::Error;
 
     #[test]
@@ -174,5 +193,12 @@ mod tests {
             idle_timout: 0,
         };
         let _ = Connection::pool(&db).await;
+    }
+
+    #[tokio::test]
+    async fn test_pool_connection_helper() -> Result<(), Error> {
+        let pool = pg_test().await?;
+        pool.close().await;
+        Ok(())
     }
 }
