@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
-use sqlx::{Error, Pool, Postgres};
+use sqlx::{Error, Pool, Postgres, Row, postgres::PgRow};
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
 
@@ -66,17 +66,33 @@ pub async fn add(pg: &Pool<Postgres>, new_user: NewUser) -> Result<(), Error> {
     Ok(())
 }
 
+pub async fn get_by_user_name(name: String, pool: &Pool<Postgres>) -> Result<NewUser, Error> {
+    let result = sqlx::query("select user_name, email, password from users where user_name = $1")
+        .bind(name.to_string())
+        .map(|data: PgRow| NewUser {
+            user_name: data.get("user_name"),
+            email: data.get("email"),
+            password: data.get("password"),
+        })
+        .fetch_optional(pool)
+        .await?;
+
+    match result {
+        Some(user) => Ok(NewUser::new(user.user_name, user.email, user.password)),
+        None => Err(Error::RowNotFound),
+    }
+}
+
 #[cfg(test)]
 mod tests_user {
-    use crate::auth::user::{NewUser, add};
+    use crate::auth::user::{NewUser, add, get_by_user_name};
     use crate::auth::util::hash_password;
+    use crate::config::connection;
 
     use sqlx::Error;
 
     #[tokio::test]
     async fn test_add_user() -> Result<(), Error> {
-        use crate::config::connection;
-
         let pool = connection::pg_test().await?;
         let password = "12345".to_string();
         let hash_password = hash_password(password).unwrap();
@@ -93,8 +109,6 @@ mod tests_user {
 
     #[tokio::test]
     async fn test_add_user_duplicate_user_name() -> Result<(), Error> {
-        use crate::config::connection;
-
         let pool = connection::pg_test().await?;
         let password = "12345".to_string();
         let hash_password = hash_password(password).unwrap();
@@ -106,6 +120,26 @@ mod tests_user {
         let result = add(&pool, new_user).await;
 
         assert!(result.is_err());
+        pool.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_user_name() -> Result<(), Error> {
+        let pool = connection::pg_test().await?;
+        let name = "Jordan".to_string();
+        let user = get_by_user_name(name.clone(), &pool).await?;
+        assert_eq!(name, user.user_name);
+        pool.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_user_name_not_found() -> Result<(), Error> {
+        let pool = connection::pg_test().await?;
+        let name = "test".to_string();
+        let user_name = get_by_user_name(name.clone(), &pool).await;
+        assert!(user_name.is_err());
         pool.close().await;
         Ok(())
     }
