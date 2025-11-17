@@ -1,9 +1,11 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, error::Error as fmt_error};
 
 use serde::{Deserialize, Serialize};
 use sqlx::{Error, Pool, Postgres, Row, postgres::PgRow};
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
+
+use crate::auth::util::{MsgError, hash_password, passwords_match};
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
 #[validate(context = UserContext,
@@ -83,9 +85,68 @@ pub async fn get_by_user_name(name: String, pool: &Pool<Postgres>) -> Result<New
     }
 }
 
+pub async fn get_by_user_id(user_id: String, pool: &Pool<Postgres>) -> Result<NewUser, Error> {
+    let result = sqlx::query("select user_name, email, password from users where user_id = $1")
+        .bind(user_id.to_string())
+        .map(|data: PgRow| NewUser {
+            user_name: data.get("user_name"),
+            email: data.get("email"),
+            password: data.get("password"),
+        })
+        .fetch_optional(pool)
+        .await?;
+
+    match result {
+        Some(user) => Ok(NewUser::new(user.user_name, user.email, user.password)),
+        None => Err(Error::RowNotFound),
+    }
+}
+
+async fn new_password(
+    user_id: &str,
+    new_pwd: &str,
+    pool: &Pool<Postgres>,
+) -> Result<(String, bool), MsgError> {
+    let user = get_by_user_id(user_id.to_string(), pool)
+        .await
+        .map_err(|e| MsgError(format!("Failed to get user: {}", e)))?;
+
+    let match_password = passwords_match(&user.password, new_pwd)
+        .map_err(|e| MsgError(format!("Failed to compare passwords: {}", e)))?;
+    if match_password {
+        let msg = format!("New password cannot be the same as the current password");
+        return Err(MsgError(msg));
+    }
+
+    let pwd = hash_password(new_pwd.to_string())
+        .map_err(|e| MsgError(format!("Failed to hash password: {}", e)))?;
+    Ok((pwd, match_password))
+}
+
+pub async fn update_password(
+    user_id: &str,
+    new_pwd: &str,
+    pool: &Pool<Postgres>,
+) -> Result<bool, Error> {
+    let mut tx = pool.begin().await?;
+    let pwd = new_password(user_id, new_pwd, pool)
+        .await
+        .map_err(|e| Error::Configuration(e.0.into()))?;
+
+    let sql = "update users set password = $1 where user_id = $2";
+    sqlx::query(sql)
+        .bind(&pwd.0)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+    Ok(pwd.1)
+}
+
 #[cfg(test)]
 mod tests_user {
-    use crate::auth::user::{NewUser, add, get_by_user_name};
+    use crate::auth::user::{NewUser, add, get_by_user_name, update_password};
     use crate::auth::util::hash_password;
     use crate::config::connection;
 
@@ -140,6 +201,30 @@ mod tests_user {
         let name = "test".to_string();
         let user_name = get_by_user_name(name.clone(), &pool).await;
         assert!(user_name.is_err());
+        pool.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_update_password() -> Result<(), Error> {
+        let user_id = "7718d688-efaa-4195-868e-98fd5ffa3bcf";
+        let pool = connection::pg_test().await?;
+        let password = "123456";
+
+        let result = update_password(user_id, password, &pool).await;
+        assert!(result.is_ok());
+        pool.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_update_password_with_matching_password() -> Result<(), Error> {
+        let user_id = "7718d688-efaa-4195-868e-98fd5ffa3bcf";
+        let pool = connection::pg_test().await?;
+        let password = "123456";
+
+        let result = update_password(user_id, password, &pool).await;
+        assert!(result.is_err());
         pool.close().await;
         Ok(())
     }
