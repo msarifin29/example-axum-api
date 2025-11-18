@@ -33,6 +33,18 @@ impl NewUser {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserResponse {
+    pub page: i32,
+    pub data: Vec<User>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct User {
+    pub user_name: String,
+    pub email: String,
+}
+
 pub struct UserContext {
     pub user_name: String,
 }
@@ -144,9 +156,44 @@ pub async fn update_password(
     Ok(pwd.1)
 }
 
+pub async fn get_users(
+    page: i32,
+    user_name: &str,
+    pool: &Pool<Postgres>,
+) -> Result<UserResponse, Error> {
+    let mut sql = String::from("select user_name, email from users");
+    let offset = if page > 0 { (page - 1) * 10 } else { 0 };
+    let users = if !user_name.is_empty() {
+        sql.push_str(" where user_name like $1 order by user_name desc limit 10 offset $2");
+        let result = sqlx::query(&sql)
+            .bind(format!("%{}%", user_name))
+            .bind(offset)
+            .map(|data: PgRow| User {
+                user_name: data.get("user_name"),
+                email: data.get("email"),
+            })
+            .fetch_all(pool)
+            .await?;
+
+        result
+    } else {
+        sql.push_str(" order by user_name desc limit 10 offset $1");
+        let result = sqlx::query(&sql)
+            .bind(offset)
+            .map(|data: PgRow| User {
+                user_name: data.get("user_name"),
+                email: data.get("email"),
+            })
+            .fetch_all(pool)
+            .await?;
+        result
+    };
+    Ok(UserResponse { page, data: users })
+}
+
 #[cfg(test)]
 mod tests_user {
-    use crate::auth::user::{NewUser, add, get_by_user_name, update_password};
+    use crate::auth::user::{NewUser, add, get_by_user_name, get_users, update_password};
     use crate::auth::util::hash_password;
     use crate::config::connection;
 
@@ -225,6 +272,24 @@ mod tests_user {
 
         let result = update_password(user_id, password, &pool).await;
         assert!(result.is_err());
+        pool.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_users() -> Result<(), Error> {
+        let pool = connection::pg_test().await?;
+        let result = get_users(0, "", &pool).await;
+        assert!(result.is_ok());
+        pool.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_users_with_name() -> Result<(), Error> {
+        let pool = connection::pg_test().await?;
+        let result = get_users(0, "J", &pool).await;
+        assert!(result.is_ok());
         pool.close().await;
         Ok(())
     }
