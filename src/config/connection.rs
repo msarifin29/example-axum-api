@@ -132,7 +132,7 @@ mod tests {
         };
 
         assert_eq!(db.user, "postgres");
-        assert_eq!(db.name, "roger_dev");
+        assert_eq!(db.name, "roger_db");
         assert_eq!(db.host, "localhost");
         assert_eq!(db.port, 5432);
         assert_eq!(db.max_connection, 10);
