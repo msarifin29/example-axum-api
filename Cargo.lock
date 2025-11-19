@@ -631,6 +631,7 @@ dependencies = [
  "log",
  "log4rs",
  "serde",
+ "serde_json",
  "sqlx",
  "tokio",
  "tower",

@@ -1,11 +1,12 @@
 use std::borrow::Cow;
 
+use crate::auth::util::{MsgError, hash_password, passwords_match};
+use axum::response::{IntoResponse, Json};
+use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use sqlx::{Error, Pool, Postgres, Row, postgres::PgRow};
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
-
-use crate::auth::util::{MsgError, hash_password, passwords_match};
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
 #[validate(context = UserContext,
@@ -41,8 +42,16 @@ pub struct UserResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
+    pub user_id: String,
     pub user_name: String,
     pub email: String,
+}
+
+impl IntoResponse for UserResponse {
+    fn into_response(self) -> axum::response::Response {
+        let status = StatusCode::OK;
+        (status, Json(self)).into_response()
+    }
 }
 
 pub struct UserContext {
@@ -71,7 +80,7 @@ pub async fn add(pg: &Pool<Postgres>, new_user: NewUser) -> Result<User, Error> 
     let hash = hash_password(new_user.password.clone()).unwrap();
 
     sqlx::query(script)
-        .bind(uid.to_string())
+        .bind(uid.to_string().clone())
         .bind(new_user.user_name.clone())
         .bind(new_user.email.clone())
         .bind(hash)
@@ -80,6 +89,7 @@ pub async fn add(pg: &Pool<Postgres>, new_user: NewUser) -> Result<User, Error> 
 
     tx.commit().await?;
     Ok(User {
+        user_id: uid.to_string(),
         user_name: new_user.user_name,
         email: new_user.email,
     })
@@ -166,7 +176,7 @@ pub async fn get_users(
     user_name: &str,
     pool: &Pool<Postgres>,
 ) -> Result<UserResponse, Error> {
-    let mut sql = String::from("select user_name, email from users");
+    let mut sql = String::from("select user_id, user_name, email from users");
     let offset = if page > 0 { (page - 1) * 10 } else { 0 };
     let users = if !user_name.is_empty() {
         sql.push_str(" where user_name like $1 order by user_name desc limit 10 offset $2");
@@ -174,6 +184,7 @@ pub async fn get_users(
             .bind(format!("%{}%", user_name))
             .bind(offset)
             .map(|data: PgRow| User {
+                user_id: data.get("user_id"),
                 user_name: data.get("user_name"),
                 email: data.get("email"),
             })
@@ -186,6 +197,7 @@ pub async fn get_users(
         let result = sqlx::query(&sql)
             .bind(offset)
             .map(|data: PgRow| User {
+                user_id: data.get("user_id"),
                 user_name: data.get("user_name"),
                 email: data.get("email"),
             })

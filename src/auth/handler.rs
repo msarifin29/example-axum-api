@@ -1,5 +1,5 @@
 use crate::auth::{
-    user::{NewUser, User, UserResponse, add, get_users},
+    user::{NewUser, User, UserResponse, add, get_users, update_password},
     util::{MetaResponse, StatusCodeExt},
 };
 use axum::{
@@ -85,19 +85,47 @@ pub async fn get_users_handler(
     })
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdatePasswordParam {
+    pub user_id: String,
+    pub password: String,
+}
+
+pub async fn update_password_handler(
+    State(pool): State<Arc<Pool<Postgres>>>,
+    Form(req): Form<UpdatePasswordParam>,
+) -> MetaResponse {
+    let result = update_password(&req.user_id, &req.password, &pool).await;
+    match result {
+        Ok(_) => MetaResponse {
+            code: StatusCode::OK.to_i32(),
+            message: String::from("Success"),
+        },
+        Err(e) => MetaResponse {
+            code: StatusCode::BAD_REQUEST.to_i32(),
+            message: e.to_string(),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests_user {
     use axum_test::TestServer;
 
     use axum::{
         Router,
-        routing::{get, post},
+        body::Body,
+        routing::{get, post, put},
     };
+    use http::{Request, StatusCode};
+    use tower::ServiceExt;
 
-    use crate::auth::handler::{NewUser, add_user_handler, get_users_handler};
+    use crate::auth::handler::{
+        NewUser, UpdatePasswordParam, add_user_handler, get_users_handler, update_password_handler,
+    };
     use crate::config::connection::ConnectionBuilder;
     use sqlx::{Pool, Postgres};
-    use std::sync::Arc;
+    use std::{sync::Arc, usize};
 
     #[tokio::test]
     async fn test_add_user() {
@@ -109,7 +137,7 @@ mod tests_user {
         let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
 
         let app = Router::new()
-            .route("/api/user", post(add_user_handler))
+            .route("/api/users", post(add_user_handler))
             .with_state(db_state);
 
         let server = TestServer::new(app).unwrap();
@@ -118,7 +146,7 @@ mod tests_user {
             email: "jhonkei.example.@mail.com".to_string(),
             password: "123456".to_string(),
         };
-        let response = server.post("/api/user").form(&body).await;
+        let response = server.post("/api/users").form(&body).await;
         response.assert_status_ok();
     }
 
@@ -160,5 +188,49 @@ mod tests_user {
 
         let response = server.get("/api/users?page=1&user_name=J").await;
         response.assert_status_ok();
+    }
+
+    #[tokio::test]
+    async fn test_update_password() {
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder)
+            .await
+            .expect("Failed to connect to database");
+        let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
+
+        let app = Router::new()
+            .route("/api/users", post(add_user_handler))
+            .route("/api/users", put(update_password_handler))
+            .with_state(db_state);
+
+        let server = TestServer::new(app.clone()).unwrap();
+
+        let form_data = "user_name=hallowen&email=crud@example.com&password=pass123";
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/users")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(form_data))
+            .unwrap();
+
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+
+        let create_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        let user_id = create_response["data"]["user_id"]
+            .as_str()
+            .expect("user_id not found");
+
+        let param = UpdatePasswordParam {
+            user_id: user_id.to_string(),
+            password: "65431".to_string(),
+        };
+        let response = server.put("/api/users").form(&param).await;
+        assert_eq!(response.status_code(), StatusCode::OK);
     }
 }
