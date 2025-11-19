@@ -137,9 +137,12 @@ mod tests_user {
     use http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    use crate::auth::handler::{
-        NewUser, UpdatePasswordParam, add_user_handler, delete_user_handler, get_users_handler,
-        update_password_handler,
+    use crate::auth::{
+        handler::{
+            NewUser, UpdatePasswordParam, add_user_handler, delete_user_handler, get_users_handler,
+            update_password_handler,
+        },
+        util::random_name,
     };
     use crate::config::connection::ConnectionBuilder;
     use sqlx::{Pool, Postgres};
@@ -159,9 +162,11 @@ mod tests_user {
             .with_state(db_state);
 
         let server = TestServer::new(app).unwrap();
+        let user_name = random_name().to_string();
+        let email = format!("{}.example.@mail.com", user_name.clone());
         let body = NewUser {
-            user_name: "jhonkei".to_string(),
-            email: "jhonkei.example.@mail.com".to_string(),
+            user_name: user_name,
+            email: email,
             password: "123456".to_string(),
         };
         let response = server.post("/api/users").form(&body).await;
@@ -181,11 +186,16 @@ mod tests_user {
             .with_state(db_state);
 
         let server = TestServer::new(app).unwrap();
+        let user_name = random_name().to_string();
+        let email = format!("{}.example.@mail.com", user_name.clone());
         let body = NewUser {
-            user_name: "jhonkei".to_string(),
-            email: "jhonkei.example.@mail.com".to_string(),
+            user_name: user_name,
+            email: email,
             password: "123456".to_string(),
         };
+        let response = server.post("/api/users").form(&body).await;
+        response.assert_status_ok();
+
         let response = server.post("/api/users").form(&body).await;
         response.assert_status_bad_request();
     }
@@ -222,8 +232,11 @@ mod tests_user {
             .with_state(db_state);
 
         let server = TestServer::new(app.clone()).unwrap();
-
-        let form_data = "user_name=hallowen&email=crud@example.com&password=pass123";
+        let name = random_name().to_string();
+        let form_data = format!(
+            "user_name={}&email={}@example.com&password=pass123",
+            name, name
+        );
         let request = Request::builder()
             .method("POST")
             .uri("/api/users")

@@ -4,12 +4,12 @@ use argon2::{
 };
 use axum::response::IntoResponse;
 use http::StatusCode;
+use rand::{self, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error as fmt_error,
     fmt::{self, Display},
 };
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MetaResponse {
     pub code: i32,
@@ -77,9 +77,33 @@ pub fn passwords_match(pwd: &str, new_pwd: &str) -> Result<bool, MsgError> {
         .is_ok())
 }
 
+pub fn random_name() -> String {
+    let mut rng = rand::rng();
+    let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyz".chars().collect();
+
+    let min_len = 7usize;
+
+    let name_length = if chars.len() > min_len {
+        rng.random_range(min_len..chars.len())
+    } else {
+        chars.len()
+    };
+
+    (0..name_length)
+        .map(|i| {
+            let random_char = chars[rng.random_range(0..chars.len())];
+            if i == 0 {
+                random_char.to_ascii_uppercase()
+            } else {
+                random_char
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests_util_password {
-    use crate::auth::util::{hash_password, parse_password, passwords_match};
+    use crate::auth::util::{hash_password, parse_password, passwords_match, random_name};
     use argon2::{
         Argon2,
         password_hash::{PasswordHash, PasswordVerifier},
@@ -141,5 +165,11 @@ mod tests_util_password {
         let new_pwd = "1234".to_string();
         let result = passwords_match(&hash, &new_pwd).unwrap();
         assert_eq!(result, false);
+    }
+
+    #[test]
+    fn test_generate_name() {
+        let name = random_name();
+        assert!(name.len() > 6);
     }
 }

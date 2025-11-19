@@ -8,7 +8,7 @@ use sqlx::{Error, Pool, Postgres, Row, postgres::PgRow};
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
 
-#[derive(Debug, Serialize, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate, Clone)]
 #[validate(context = UserContext,
 schema(
     function="unique_name",
@@ -93,23 +93,6 @@ pub async fn add(pg: &Pool<Postgres>, new_user: NewUser) -> Result<User, Error> 
         user_name: new_user.user_name,
         email: new_user.email,
     })
-}
-
-pub async fn get_by_user_name(name: String, pool: &Pool<Postgres>) -> Result<NewUser, Error> {
-    let result = sqlx::query("select user_name, email, password from users where user_name = $1")
-        .bind(name.to_string())
-        .map(|data: PgRow| NewUser {
-            user_name: data.get("user_name"),
-            email: data.get("email"),
-            password: data.get("password"),
-        })
-        .fetch_optional(pool)
-        .await?;
-
-    match result {
-        Some(user) => Ok(NewUser::new(user.user_name, user.email, user.password)),
-        None => Err(Error::RowNotFound),
-    }
 }
 
 pub async fn get_by_user_id(user_id: String, pool: &Pool<Postgres>) -> Result<NewUser, Error> {
@@ -219,10 +202,8 @@ pub async fn delete_user(user_id: &str, pool: &Pool<Postgres>) -> Result<bool, E
 
 #[cfg(test)]
 mod tests_user {
-    use crate::auth::user::{
-        NewUser, add, delete_user, get_by_user_name, get_users, update_password,
-    };
-    use crate::auth::util::hash_password;
+    use crate::auth::user::{NewUser, add, delete_user, get_users, update_password};
+    use crate::auth::util::{hash_password, random_name};
     use crate::config::connection::ConnectionBuilder;
 
     use sqlx::Error;
@@ -231,15 +212,16 @@ mod tests_user {
     async fn test_add_user() -> Result<(), Error> {
         let builder = ConnectionBuilder(String::from("dev.toml"));
         let pool = ConnectionBuilder::new(&builder).await?;
+
         let password = "12345".to_string();
         let hash_password = hash_password(password).unwrap();
-        let new_user = NewUser::new(
-            "Jordan".to_string(),
-            "jordan@mail.com".to_string(),
-            hash_password.to_string(),
-        );
-        add(&pool, new_user).await?;
+        let user_name = random_name().to_string();
+        let email = format!("{}.example.@mail.com", user_name.clone());
+        let new_user = NewUser::new(user_name.clone(), email.clone(), hash_password.to_string());
 
+        let user = add(&pool, new_user).await?;
+        assert_eq!(user.user_name, user_name);
+        assert_eq!(user.email, email);
         pool.close().await;
         Ok(())
     }
@@ -248,50 +230,41 @@ mod tests_user {
     async fn test_add_user_duplicate_user_name() -> Result<(), Error> {
         let builder = ConnectionBuilder(String::from("dev.toml"));
         let pool = ConnectionBuilder::new(&builder).await?;
+
         let password = "12345".to_string();
         let hash_password = hash_password(password).unwrap();
-        let new_user = NewUser::new(
-            "Jordan".to_string(),
-            "jordan@mail.com".to_string(),
-            hash_password.to_string(),
-        );
-        let result = add(&pool, new_user).await;
+        let user_name = random_name().to_string();
+        let email = format!("{}.example.@mail.com", user_name.clone());
+        let new_user = NewUser::new(user_name.clone(), email.clone(), hash_password.to_string());
 
+        let user = add(&pool, new_user.clone()).await?;
+        assert_eq!(user.user_name, user_name);
+        assert_eq!(user.email, email);
+
+        let result = add(&pool, new_user).await;
         assert!(result.is_err());
         pool.close().await;
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_get_user_name() -> Result<(), Error> {
-        let builder = ConnectionBuilder(String::from("dev.toml"));
-        let pool = ConnectionBuilder::new(&builder).await?;
-        let name = "Jordan".to_string();
-        let user = get_by_user_name(name.clone(), &pool).await?;
-        assert_eq!(name, user.user_name);
-        pool.close().await;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_get_user_name_not_found() -> Result<(), Error> {
-        let builder = ConnectionBuilder(String::from("dev.toml"));
-        let pool = ConnectionBuilder::new(&builder).await?;
-        let name = "test".to_string();
-        let user_name = get_by_user_name(name.clone(), &pool).await;
-        assert!(user_name.is_err());
-        pool.close().await;
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_update_password() -> Result<(), Error> {
-        let user_id = "7718d688-efaa-4195-868e-98fd5ffa3bcf";
         let builder = ConnectionBuilder(String::from("dev.toml"));
         let pool = ConnectionBuilder::new(&builder).await?;
-        let password = "123456";
+        let password = "123456".to_string();
+        let hash = hash_password(password).unwrap();
+        let user_name = random_name().to_string();
+        let email = format!("{}.example.@mail.com", user_name.clone());
+        let new_user = NewUser::new(user_name.clone(), email.clone(), hash.to_string());
 
-        let result = update_password(user_id, password, &pool).await;
+        let user = add(&pool, new_user).await?;
+        assert_eq!(user.user_name, user_name);
+        assert_eq!(user.email, email);
+
+        let user_id = &user.user_id;
+        let new_password = random_name().to_string();
+        let hash = hash_password(new_password).unwrap();
+        let result = update_password(user_id, &hash, &pool).await;
         assert!(result.is_ok());
         pool.close().await;
         Ok(())
@@ -299,12 +272,22 @@ mod tests_user {
 
     #[tokio::test]
     async fn test_update_password_with_matching_password() -> Result<(), Error> {
-        let user_id = "7718d688-efaa-4195-868e-98fd5ffa3bcf";
         let builder = ConnectionBuilder(String::from("dev.toml"));
         let pool = ConnectionBuilder::new(&builder).await?;
-        let password = "123456";
 
-        let result = update_password(user_id, password, &pool).await;
+        let password = "123456".to_string();
+        let hash = hash_password(password).unwrap();
+        let user_name = random_name().to_string();
+        let email = format!("{}.example.@mail.com", user_name.clone());
+        let new_user = NewUser::new(user_name.clone(), email.clone(), hash.to_string());
+
+        let user = add(&pool, new_user).await?;
+        assert_eq!(user.user_name, user_name);
+        assert_eq!(user.email, email);
+
+        let user_id = &user.user_id;
+
+        let result = update_password(user_id, &hash, &pool).await;
         assert!(result.is_err());
         pool.close().await;
         Ok(())
@@ -335,14 +318,15 @@ mod tests_user {
         let builder = ConnectionBuilder(String::from("dev.toml"));
         let pool = ConnectionBuilder::new(&builder).await?;
 
-        let password = "12345".to_string();
-        let hash_password = hash_password(password).unwrap();
-        let new_user = NewUser::new(
-            "michael".to_string(),
-            "michael@mail.com".to_string(),
-            hash_password.to_string(),
-        );
+        let password = "123456".to_string();
+        let hash = hash_password(password).unwrap();
+        let user_name = random_name().to_string();
+        let email = format!("{}.example.@mail.com", user_name.clone());
+        let new_user = NewUser::new(user_name.clone(), email.clone(), hash.to_string());
+
         let user = add(&pool, new_user).await?;
+        assert_eq!(user.user_name, user_name);
+        assert_eq!(user.email, email);
 
         let result = delete_user(&user.user_id, &pool).await;
         assert!(result.is_ok());
