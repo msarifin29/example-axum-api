@@ -62,22 +62,27 @@ fn unique_name(user: &NewUser, context: &UserContext) -> Result<(), ValidationEr
     Ok(())
 }
 
-pub async fn add(pg: &Pool<Postgres>, new_user: NewUser) -> Result<(), Error> {
+pub async fn add(pg: &Pool<Postgres>, new_user: NewUser) -> Result<User, Error> {
     let mut tx = pg.begin().await?;
 
     let script = "insert into users(user_id, user_name, email, password) values($1, $2, $3, $4)";
     let uid = Uuid::new_v4();
 
+    let hash = hash_password(new_user.password.clone()).unwrap();
+
     sqlx::query(script)
         .bind(uid.to_string())
-        .bind(new_user.user_name)
-        .bind(new_user.email)
-        .bind(new_user.password)
+        .bind(new_user.user_name.clone())
+        .bind(new_user.email.clone())
+        .bind(hash)
         .execute(&mut *tx)
         .await?;
 
     tx.commit().await?;
-    Ok(())
+    Ok(User {
+        user_name: new_user.user_name,
+        email: new_user.email,
+    })
 }
 
 pub async fn get_by_user_name(name: String, pool: &Pool<Postgres>) -> Result<NewUser, Error> {

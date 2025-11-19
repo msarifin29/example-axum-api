@@ -1,12 +1,40 @@
+use argon2::{
+    Argon2, PasswordHash, PasswordVerifier,
+    password_hash::{Error, PasswordHasher, SaltString, rand_core::OsRng},
+};
+use axum::response::IntoResponse;
+use http::StatusCode;
+use serde::{Deserialize, Serialize};
 use std::{
     error::Error as fmt_error,
     fmt::{self, Display},
 };
 
-use argon2::{
-    Argon2, PasswordHash, PasswordVerifier,
-    password_hash::{Error, PasswordHasher, SaltString, rand_core::OsRng},
-};
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MetaResponse {
+    pub code: i32,
+    pub message: String,
+}
+
+impl IntoResponse for MetaResponse {
+    fn into_response(self) -> axum::response::Response {
+        (
+            StatusCode::from_u16(self.code as u16).unwrap(),
+            self.message,
+        )
+            .into_response()
+    }
+}
+
+pub trait StatusCodeExt {
+    fn to_i32(&self) -> i32;
+}
+
+impl StatusCodeExt for StatusCode {
+    fn to_i32(&self) -> i32 {
+        self.as_u16() as i32
+    }
+}
 
 pub fn hash_password(pwd: String) -> Result<String, Error> {
     let number: &[u8] = pwd.as_bytes();
