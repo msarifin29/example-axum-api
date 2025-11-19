@@ -1,10 +1,10 @@
 use crate::auth::{
-    user::{NewUser, User, UserResponse, add, get_users, update_password},
+    user::{NewUser, User, UserResponse, add, delete_user, get_users, update_password},
     util::{MetaResponse, StatusCodeExt},
 };
 use axum::{
     Form,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::{IntoResponse, Json, Response},
 };
 use http::StatusCode;
@@ -108,6 +108,23 @@ pub async fn update_password_handler(
     }
 }
 
+pub async fn delete_user_handler(
+    State(pool): State<Arc<Pool<Postgres>>>,
+    Path(user_id): Path<String>,
+) -> MetaResponse {
+    let result = delete_user(&user_id, &pool).await;
+    match result {
+        Ok(_) => MetaResponse {
+            code: StatusCode::OK.to_i32(),
+            message: String::from("Success"),
+        },
+        Err(e) => MetaResponse {
+            code: StatusCode::BAD_REQUEST.to_i32(),
+            message: e.to_string(),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests_user {
     use axum_test::TestServer;
@@ -115,13 +132,14 @@ mod tests_user {
     use axum::{
         Router,
         body::Body,
-        routing::{get, post, put},
+        routing::{delete, get, post, put},
     };
     use http::{Request, StatusCode};
     use tower::ServiceExt;
 
     use crate::auth::handler::{
-        NewUser, UpdatePasswordParam, add_user_handler, get_users_handler, update_password_handler,
+        NewUser, UpdatePasswordParam, add_user_handler, delete_user_handler, get_users_handler,
+        update_password_handler,
     };
     use crate::config::connection::ConnectionBuilder;
     use sqlx::{Pool, Postgres};
@@ -231,6 +249,46 @@ mod tests_user {
             password: "65431".to_string(),
         };
         let response = server.put("/api/users").form(&param).await;
+        assert_eq!(response.status_code(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_delete_user() {
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder)
+            .await
+            .expect("Failed to connect to database");
+        let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
+
+        let app = Router::new()
+            .route("/api/users", post(add_user_handler))
+            .route("/api/users/{user_id}", delete(delete_user_handler))
+            .with_state(db_state);
+
+        let server = TestServer::new(app.clone()).unwrap();
+
+        let form_data = "user_name=testdelete&email=crud@example.com&password=pass123";
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/users")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(form_data))
+            .unwrap();
+
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+
+        let create_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        let user_id = create_response["data"]["user_id"]
+            .as_str()
+            .expect("user_id not found");
+        let path = format!("/api/users/{}", user_id);
+        let response = server.delete(&path).await;
         assert_eq!(response.status_code(), StatusCode::OK);
     }
 }

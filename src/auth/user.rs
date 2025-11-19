@@ -208,9 +208,20 @@ pub async fn get_users(
     Ok(UserResponse { page, data: users })
 }
 
+pub async fn delete_user(user_id: &str, pool: &Pool<Postgres>) -> Result<bool, Error> {
+    let sql = "delete from users where user_id = $1";
+    let mut tx = pool.begin().await?;
+    sqlx::query(sql).bind(user_id).execute(&mut *tx).await?;
+
+    tx.commit().await?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests_user {
-    use crate::auth::user::{NewUser, add, get_by_user_name, get_users, update_password};
+    use crate::auth::user::{
+        NewUser, add, delete_user, get_by_user_name, get_users, update_password,
+    };
     use crate::auth::util::hash_password;
     use crate::config::connection::ConnectionBuilder;
 
@@ -315,6 +326,27 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder).await?;
         let result = get_users(0, "J", &pool).await;
         assert!(result.is_ok());
+        pool.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_delete_user() -> Result<(), Error> {
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
+
+        let password = "12345".to_string();
+        let hash_password = hash_password(password).unwrap();
+        let new_user = NewUser::new(
+            "michael".to_string(),
+            "michael@mail.com".to_string(),
+            hash_password.to_string(),
+        );
+        let user = add(&pool, new_user).await?;
+
+        let result = delete_user(&user.user_id, &pool).await;
+        assert!(result.is_ok());
+
         pool.close().await;
         Ok(())
     }
