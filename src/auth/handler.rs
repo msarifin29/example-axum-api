@@ -46,16 +46,20 @@ pub async fn add_user_handler(
 mod tests_user {
     use axum_test::TestServer;
 
-    use crate::config::connection::pg_test;
     use axum::{Router, routing::post};
 
     use crate::auth::handler::{NewUser, add_user_handler};
+    use crate::config::connection::ConnectionBuilder;
     use sqlx::{Pool, Postgres};
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_add_user() {
-        let pool = pg_test().await.expect("Failed to connect to database");
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder)
+            .await
+            .expect("Failed to connect to database");
+
         let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
 
         let app = Router::new()
@@ -74,7 +78,10 @@ mod tests_user {
 
     #[tokio::test]
     async fn test_add_user_duplicate_username() {
-        let pool = pg_test().await.expect("Failed to connect to database");
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder)
+            .await
+            .expect("Failed to connect to database");
         let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
 
         let app = Router::new()

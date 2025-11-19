@@ -1,4 +1,4 @@
-use std::{borrow::Cow, error::Error as fmt_error};
+use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 use sqlx::{Error, Pool, Postgres, Row, postgres::PgRow};
@@ -200,13 +200,14 @@ pub async fn get_users(
 mod tests_user {
     use crate::auth::user::{NewUser, add, get_by_user_name, get_users, update_password};
     use crate::auth::util::hash_password;
-    use crate::config::connection;
+    use crate::config::connection::ConnectionBuilder;
 
     use sqlx::Error;
 
     #[tokio::test]
     async fn test_add_user() -> Result<(), Error> {
-        let pool = connection::pg_test().await?;
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
         let password = "12345".to_string();
         let hash_password = hash_password(password).unwrap();
         let new_user = NewUser::new(
@@ -222,7 +223,8 @@ mod tests_user {
 
     #[tokio::test]
     async fn test_add_user_duplicate_user_name() -> Result<(), Error> {
-        let pool = connection::pg_test().await?;
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
         let password = "12345".to_string();
         let hash_password = hash_password(password).unwrap();
         let new_user = NewUser::new(
@@ -239,7 +241,8 @@ mod tests_user {
 
     #[tokio::test]
     async fn test_get_user_name() -> Result<(), Error> {
-        let pool = connection::pg_test().await?;
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
         let name = "Jordan".to_string();
         let user = get_by_user_name(name.clone(), &pool).await?;
         assert_eq!(name, user.user_name);
@@ -249,7 +252,8 @@ mod tests_user {
 
     #[tokio::test]
     async fn test_get_user_name_not_found() -> Result<(), Error> {
-        let pool = connection::pg_test().await?;
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
         let name = "test".to_string();
         let user_name = get_by_user_name(name.clone(), &pool).await;
         assert!(user_name.is_err());
@@ -260,7 +264,8 @@ mod tests_user {
     #[tokio::test]
     async fn test_update_password() -> Result<(), Error> {
         let user_id = "7718d688-efaa-4195-868e-98fd5ffa3bcf";
-        let pool = connection::pg_test().await?;
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
         let password = "123456";
 
         let result = update_password(user_id, password, &pool).await;
@@ -272,7 +277,8 @@ mod tests_user {
     #[tokio::test]
     async fn test_update_password_with_matching_password() -> Result<(), Error> {
         let user_id = "7718d688-efaa-4195-868e-98fd5ffa3bcf";
-        let pool = connection::pg_test().await?;
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
         let password = "123456";
 
         let result = update_password(user_id, password, &pool).await;
@@ -283,7 +289,8 @@ mod tests_user {
 
     #[tokio::test]
     async fn test_get_users() -> Result<(), Error> {
-        let pool = connection::pg_test().await?;
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
         let result = get_users(0, "", &pool).await;
         assert!(result.is_ok());
         pool.close().await;
@@ -292,7 +299,8 @@ mod tests_user {
 
     #[tokio::test]
     async fn test_get_users_with_name() -> Result<(), Error> {
-        let pool = connection::pg_test().await?;
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
         let result = get_users(0, "J", &pool).await;
         assert!(result.is_ok());
         pool.close().await;

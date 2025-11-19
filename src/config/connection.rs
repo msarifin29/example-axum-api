@@ -47,9 +47,9 @@ impl DB {
 }
 
 #[derive(Debug)]
-pub struct ConnectionBuilder;
+pub struct Configure;
 
-impl ConnectionBuilder {
+impl Configure {
     pub fn build(name: &str) -> Result<Config, ConfigError> {
         let builder = Config::builder()
             .add_source(File::new(name, FileFormat::Toml))
@@ -68,19 +68,32 @@ impl ConnectionBuilder {
     }
 }
 
-pub trait Connection {
-    async fn pool(&self) -> Result<Pool<Postgres>, Error>;
-}
+#[derive(Debug)]
+pub struct ConnectionBuilder(pub String);
 
-impl Connection for DB {
-    async fn pool(&self) -> Result<Pool<Postgres>, Error> {
-        let url = self.url.clone();
+impl ConnectionBuilder {
+    pub async fn new(&self) -> Result<Pool<Postgres>, Error> {
+        let con = Configure::build(&self.0).unwrap();
+
+        let db: DB = DB {
+            url: con.get_string("database.url").unwrap(),
+            user: con.get_string("database.user").unwrap(),
+            name: con.get_string("database.name").unwrap(),
+            host: con.get_string("database.host").unwrap(),
+            port: con.get_int("database.port").unwrap(),
+            password: con.get_string("database.password").unwrap(),
+            max_connection: con.get_int("database.max_connection").unwrap(),
+            min_connection: con.get_int("database.min_connection").unwrap(),
+            acquired_timout: con.get_int("database.acquire_timeout").unwrap(),
+            idle_timout: con.get_int("database.idle_timeout").unwrap(),
+        };
+
         let result = PgPoolOptions::new()
-            .max_connections(self.max_connection as u32)
-            .min_connections(self.min_connection as u32)
-            .acquire_timeout(Duration::from_secs(self.acquired_timout as u64))
-            .idle_timeout(Duration::from_secs(self.idle_timout as u64))
-            .connect(&url)
+            .max_connections(db.max_connection as u32)
+            .min_connections(db.min_connection as u32)
+            .acquire_timeout(Duration::from_secs(db.acquired_timout as u64))
+            .idle_timeout(Duration::from_secs(db.idle_timout as u64))
+            .connect(&db.url)
             .await;
 
         match result {
@@ -96,34 +109,15 @@ impl Connection for DB {
     }
 }
 
-pub async fn pg_test() -> Result<Pool<Postgres>, Error> {
-    let con = ConnectionBuilder::build("dev.toml").unwrap();
-
-    let db: DB = DB {
-        url: con.get_string("database.url").unwrap(),
-        user: con.get_string("database.user").unwrap(),
-        name: con.get_string("database.name").unwrap(),
-        host: con.get_string("database.host").unwrap(),
-        port: con.get_int("database.port").unwrap(),
-        password: con.get_string("database.password").unwrap(),
-        max_connection: con.get_int("database.max_connection").unwrap(),
-        min_connection: con.get_int("database.min_connection").unwrap(),
-        acquired_timout: con.get_int("database.acquire_timeout").unwrap(),
-        idle_timout: con.get_int("database.idle_timeout").unwrap(),
-    };
-    let pool = Connection::pool(&db).await?;
-    Ok(pool)
-}
-
 #[cfg(test)]
 mod tests {
 
-    use crate::config::connection::{Connection, ConnectionBuilder, DB, pg_test};
+    use crate::config::connection::{Configure, ConnectionBuilder, DB};
     use sqlx::Error;
 
     #[test]
     fn test_environment() {
-        let con = ConnectionBuilder::build("dev.toml").unwrap();
+        let con = Configure::build("dev.toml").unwrap();
 
         let db: DB = DB {
             url: con.get_string("database.url").unwrap(),
@@ -149,55 +143,31 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Failed to execute environment ")]
+    #[should_panic(expected = "Failed to execute environment : configuration file")]
     fn test_environment_error() {
-        let _ = ConnectionBuilder::build("d.toml");
+        let _ = Configure::build("d.toml");
     }
 
     #[tokio::test]
     async fn test_pool_connection() -> Result<(), Error> {
-        let con = ConnectionBuilder::build("dev.toml").unwrap();
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
 
-        let db: DB = DB {
-            url: con.get_string("database.url").unwrap(),
-            user: con.get_string("database.user").unwrap(),
-            name: con.get_string("database.name").unwrap(),
-            host: con.get_string("database.host").unwrap(),
-            port: con.get_int("database.port").unwrap(),
-            password: con.get_string("database.password").unwrap(),
-            max_connection: con.get_int("database.max_connection").unwrap(),
-            min_connection: con.get_int("database.min_connection").unwrap(),
-            acquired_timout: con.get_int("database.acquire_timeout").unwrap(),
-            idle_timout: con.get_int("database.idle_timeout").unwrap(),
-        };
-        let pool = Connection::pool(&db).await?;
         pool.close().await;
         Ok(())
     }
 
     #[tokio::test]
-    #[should_panic(expected = "invalid identifier")]
+    #[should_panic(expected = "Failed to execute environment : configuration file")]
     async fn test_pool_connection_failed() {
-        let con = ConnectionBuilder::build("dev.toml").unwrap();
-
-        let db: DB = DB {
-            url: con.get_string("").unwrap(),
-            user: "".to_string(),
-            name: "".to_string(),
-            host: "".to_string(),
-            port: 0,
-            password: "".to_string(),
-            max_connection: 0,
-            min_connection: 0,
-            acquired_timout: 0,
-            idle_timout: 0,
-        };
-        let _ = Connection::pool(&db).await;
+        let builder = ConnectionBuilder(String::from("de.toml"));
+        let _ = ConnectionBuilder::new(&builder).await;
     }
 
     #[tokio::test]
     async fn test_pool_connection_helper() -> Result<(), Error> {
-        let pool = pg_test().await?;
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder).await?;
         pool.close().await;
         Ok(())
     }
