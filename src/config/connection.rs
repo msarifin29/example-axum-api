@@ -2,11 +2,13 @@ use config::{Config, ConfigError, File, FileFormat};
 use sqlx::{Error, Pool, Postgres, postgres::PgPoolOptions};
 use std::{result::Result::Ok, time::Duration};
 
-use crate::config::logger::{LogMsg, Logger};
+use crate::{
+    auth::util::MsgError,
+    config::logger::{LogMsg, Logger},
+};
 
 #[derive(Debug)]
 pub struct DB {
-    pub url: String,
     pub user: String,
     pub password: String,
     pub host: String,
@@ -18,32 +20,10 @@ pub struct DB {
     pub idle_timout: i64,
 }
 
-impl DB {
-    pub fn new(
-        url: String,
-        user: String,
-        password: String,
-        host: String,
-        port: i64,
-        name: String,
-        max_connection: i64,
-        min_connection: i64,
-        acquired_timout: i64,
-        idle_timout: i64,
-    ) -> DB {
-        DB {
-            url: url,
-            user: user,
-            password: password,
-            host: host,
-            name: name,
-            port: port,
-            max_connection: max_connection,
-            min_connection: min_connection,
-            acquired_timout: acquired_timout,
-            idle_timout: idle_timout,
-        }
-    }
+#[derive(Debug)]
+pub struct TCP {
+    pub ip: String,
+    pub port: i32,
 }
 
 #[derive(Debug)]
@@ -76,7 +56,6 @@ impl ConnectionBuilder {
         let con = Configure::build(&self.0).unwrap();
 
         let db: DB = DB {
-            url: con.get_string("database.url").unwrap(),
             user: con.get_string("database.user").unwrap(),
             name: con.get_string("database.name").unwrap(),
             host: con.get_string("database.host").unwrap(),
@@ -88,12 +67,16 @@ impl ConnectionBuilder {
             idle_timout: con.get_int("database.idle_timeout").unwrap(),
         };
 
+        let url = format!(
+            "postgres://{}:{}@{}:{}/{}",
+            db.user, db.password, db.host, db.port, db.name
+        );
         let result = PgPoolOptions::new()
             .max_connections(db.max_connection as u32)
             .min_connections(db.min_connection as u32)
             .acquire_timeout(Duration::from_secs(db.acquired_timout as u64))
             .idle_timeout(Duration::from_secs(db.idle_timout as u64))
-            .connect(&db.url)
+            .connect(&url)
             .await;
 
         match result {
@@ -104,6 +87,23 @@ impl ConnectionBuilder {
                 let msg = format!("Failed to connect into database : {:?}", e);
                 log.err(&msg);
                 panic!("Failed to connect into database : {}", e)
+            }
+        }
+    }
+
+    pub fn listen_on(&self) -> Result<TCP, MsgError> {
+        let result = Configure::build(&self.0);
+        match result {
+            Ok(con) => Ok(TCP {
+                ip: con.get_string("tcp.ip").unwrap(),
+                port: con.get_int("tcp.port").unwrap() as i32,
+            }),
+            Err(e) => {
+                Logger::init();
+                let log = Logger;
+                let msg = format!("Failed to execute environment : {:?}", e);
+                log.err(&msg);
+                panic!("Failed to execute environment : {:?}", e)
             }
         }
     }
@@ -120,7 +120,6 @@ mod tests {
         let con = Configure::build("dev.toml").unwrap();
 
         let db: DB = DB {
-            url: con.get_string("database.url").unwrap(),
             user: con.get_string("database.user").unwrap(),
             name: con.get_string("database.name").unwrap(),
             host: con.get_string("database.host").unwrap(),
