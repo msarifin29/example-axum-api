@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 argon2 = "0.5.3"
-axum = "0.8.6"
+axum = { version = "0.8.6", features = ["ws"] }
 axum-extra = "0.12.1"
 axum-test = "18.2.1"
 chrono = "0.4.42"

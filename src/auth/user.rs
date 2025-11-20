@@ -40,7 +40,7 @@ pub struct UserResponse {
     pub data: Vec<User>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct User {
     pub user_id: String,
     pub user_name: String,

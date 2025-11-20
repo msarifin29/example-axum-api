@@ -1,5 +1,6 @@
 mod auth;
 mod config;
+mod websocket;
 
 use std::sync::Arc;
 
@@ -8,7 +9,7 @@ use axum::{
     routing::{delete, get, post, put},
 };
 
-use crate::config::connection::ConnectionBuilder;
+use crate::{config::connection::ConnectionBuilder, websocket::handler::ws_handler};
 use auth::handler::{
     add_user_handler, delete_user_handler, get_users_handler, update_password_handler,
 };
@@ -30,7 +31,11 @@ async fn main() {
         .route("/api/users", put(update_password_handler))
         .route("/api/users/{user_id}", delete(delete_user_handler));
 
-    let app = Router::new().merge(user_route).with_state(db_state);
+    let ws_route = Router::new().route("/ws", get(ws_handler));
+    let app = Router::new()
+        .merge(user_route)
+        .merge(ws_route)
+        .with_state(db_state);
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", tcp.ip, tcp.port))
         .await
