@@ -119,6 +119,86 @@ curl -v -X POST http://127.0.0.1:3000/api/users \
   -d "user_name=michael&email=michael@example.com&password=secret"
 ```
 
+## WebSocket Endpoint
+
+The project also includes a **real-time WebSocket** connection handler. See `src/websocket/handler.rs` for the implementation.
+
+**WebSocket Route:** `ws://localhost:3000/ws?user_id={user_id}`
+
+### How it works
+
+1. **Connect** with a valid `user_id` query parameter.
+2. **Server validates** the user exists in the database.
+3. If valid: connection upgrades, server sends welcome message.
+4. If invalid: server returns `401 Unauthorized`.
+5. **Message exchange**:
+   - Client sends **text** → Server echoes back with user data in JSON
+   - Client sends **binary** → Server responds with pong frame
+   - Client sends **ping** → Server responds with pong (keep-alive)
+   - Client sends **close** → Connection terminates gracefully
+
+### Example: Connect with wscat
+
+First, create a user via the REST API:
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/users \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "user_name=alice&email=alice@example.com&password=secret123"
+```
+
+Note the returned `user_id` from the response. Then connect to WebSocket:
+
+```bash
+# Install wscat if you don't have it
+npm install -g wscat
+
+# Connect to WebSocket (replace USER_ID with the actual user_id)
+wscat -c "ws://127.0.0.1:3000/ws?user_id=YOUR_USER_ID"
+
+# Once connected, you can type messages:
+# > hello world
+# < {"data":"User { user_id: \"...\", user_name: \"alice\", email: \"alice@example.com\" }","message":"hello world"}
+```
+
+### Example: Connect with JavaScript/Node.js
+
+```javascript
+// Simple WebSocket client example
+const userId = "your-user-id-here";
+const ws = new WebSocket(`ws://127.0.0.1:3000/ws?user_id=${userId}`);
+
+ws.onopen = () => {
+  console.log("Connected to WebSocket!");
+  ws.send("Hello from client!");
+};
+
+ws.onmessage = (event) => {
+  console.log("Message from server:", event.data);
+};
+
+ws.onerror = (error) => {
+  console.error("WebSocket error:", error);
+};
+
+ws.onclose = () => {
+  console.log("WebSocket connection closed");
+};
+```
+
+### Message Types Handled
+
+| Client Sends | Server Responds |
+|---|---|
+| **Text** | JSON with user data + echoed message |
+| **Binary** | Pong frame (keep-alive) |
+| **Ping** | Pong frame (keep-alive) |
+| **Close** | Closes connection gracefully |
+
+For detailed implementation, see:
+- `src/websocket/handler.rs` — WebSocket handler logic with full documentation
+- `src/websocket/mod.rs` — Route registration
+
 ## Tests
 
 - Unit & integration-like tests are present under `src/` using `tokio::test` and `axum_test`.
