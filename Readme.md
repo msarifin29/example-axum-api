@@ -159,6 +159,11 @@ wscat -c "ws://127.0.0.1:3000/ws?user_id=YOUR_USER_ID"
 # Once connected, you can type messages:
 # > hello world
 # < {"data":"User { user_id: \"...\", user_name: \"alice\", email: \"alice@example.com\" }","message":"hello world"}
+
+Or using crate websocat
+# cargo install websocat
+
+websocat ws://localhost:3000/ws?user_id=YOUR_USER_ID
 ```
 
 ### Example: Connect with JavaScript/Node.js
