@@ -9,7 +9,13 @@ use axum::{
     routing::{delete, get, post, put},
 };
 
-use crate::{config::connection::ConnectionBuilder, websocket::handler::ws_handler};
+use crate::{
+    config::connection::ConnectionBuilder,
+    websocket::{
+        chat::{PrivateChatState, private_chat_handler},
+        handler::ws_handler,
+    },
+};
 use auth::handler::{
     add_user_handler, delete_user_handler, get_users_handler, update_password_handler,
 };
@@ -18,6 +24,7 @@ use sqlx::{Pool, Postgres};
 #[derive(Clone)]
 pub struct AppState {
     pub pool: Arc<Pool<Postgres>>,
+    pub chat: Arc<PrivateChatState>,
 }
 
 #[tokio::main]
@@ -30,6 +37,7 @@ async fn main() {
 
     let state = Arc::new(AppState {
         pool: Arc::new(pool),
+        chat: Arc::new(PrivateChatState::new()),
     });
 
     let user_route = Router::new()
@@ -38,7 +46,9 @@ async fn main() {
         .route("/api/users", put(update_password_handler))
         .route("/api/users/{user_id}", delete(delete_user_handler));
 
-    let ws_route = Router::new().route("/ws", get(ws_handler));
+    let ws_route = Router::new()
+        .route("/ws", get(ws_handler))
+        .route("/ws/chat", get(private_chat_handler));
 
     let app = Router::new()
         .merge(user_route)

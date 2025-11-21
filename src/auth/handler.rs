@@ -140,6 +140,7 @@ mod tests_user {
     use tower::ServiceExt;
 
     use crate::config::connection::ConnectionBuilder;
+    use crate::websocket::chat::PrivateChatState;
     use crate::{
         AppState,
         auth::{
@@ -161,6 +162,7 @@ mod tests_user {
 
         let db_state = Arc::new(AppState {
             pool: Arc::new(pool),
+            chat: Arc::new(PrivateChatState::new()),
         });
 
         let app = Router::new()
@@ -187,6 +189,7 @@ mod tests_user {
             .expect("Failed to connect to database");
         let db_state = Arc::new(AppState {
             pool: Arc::new(pool),
+            chat: Arc::new(PrivateChatState::new()),
         });
 
         let app = Router::new()
@@ -216,6 +219,7 @@ mod tests_user {
             .expect("Failed to connect to database");
         let db_state = Arc::new(AppState {
             pool: Arc::new(pool),
+            chat: Arc::new(PrivateChatState::new()),
         });
 
         let app = Router::new()
@@ -236,6 +240,7 @@ mod tests_user {
             .expect("Failed to connect to database");
         let db_state = Arc::new(AppState {
             pool: Arc::new(pool),
+            chat: Arc::new(PrivateChatState::new()),
         });
 
         let app = Router::new()
@@ -285,6 +290,7 @@ mod tests_user {
             .expect("Failed to connect to database");
         let db_state = Arc::new(AppState {
             pool: Arc::new(pool),
+            chat: Arc::new(PrivateChatState::new()),
         });
 
         let app = Router::new()
