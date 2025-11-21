@@ -1,6 +1,9 @@
-use crate::auth::{
-    user::{NewUser, User, UserResponse, add, delete_user, get_users, update_password},
-    util::{MetaResponse, StatusCodeExt},
+use crate::{
+    AppState,
+    auth::{
+        user::{NewUser, User, UserResponse, add, delete_user, get_users, update_password},
+        util::{MetaResponse, StatusCodeExt},
+    },
 };
 use axum::{
     Form,
@@ -9,7 +12,6 @@ use axum::{
 };
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
-use sqlx::{Pool, Postgres};
 use std::sync::Arc;
 
 #[derive(serde::Serialize)]
@@ -46,10 +48,10 @@ impl IntoResponse for UsersResponse {
 }
 
 pub async fn add_user_handler(
-    State(pool): State<Arc<Pool<Postgres>>>,
+    State(state): State<Arc<AppState>>,
     Form(req): Form<NewUser>,
 ) -> Result<SingleUserResponse, MetaResponse> {
-    let result = add(&pool, req).await.map_err(|e| MetaResponse {
+    let result = add(&state.pool, req).await.map_err(|e| MetaResponse {
         code: StatusCode::BAD_REQUEST.to_i32(),
         message: e.to_string(),
     })?;
@@ -64,12 +66,12 @@ pub async fn add_user_handler(
 }
 
 pub async fn get_users_handler(
-    State(pool): State<Arc<Pool<Postgres>>>,
+    State(state): State<Arc<AppState>>,
     Query(params): Query<GetUsersQuery>,
 ) -> Result<UsersResponse, MetaResponse> {
     let page = params.page;
     let user_name = params.user_name.unwrap_or_default();
-    let result = get_users(page, &user_name, &pool)
+    let result = get_users(page, &user_name, &state.pool)
         .await
         .map_err(|e| MetaResponse {
             code: StatusCode::BAD_REQUEST.to_i32(),
@@ -92,10 +94,10 @@ pub struct UpdatePasswordParam {
 }
 
 pub async fn update_password_handler(
-    State(pool): State<Arc<Pool<Postgres>>>,
+    State(state): State<Arc<AppState>>,
     Form(req): Form<UpdatePasswordParam>,
 ) -> MetaResponse {
-    let result = update_password(&req.user_id, &req.password, &pool).await;
+    let result = update_password(&req.user_id, &req.password, &state.pool).await;
     match result {
         Ok(_) => MetaResponse {
             code: StatusCode::OK.to_i32(),
@@ -109,10 +111,10 @@ pub async fn update_password_handler(
 }
 
 pub async fn delete_user_handler(
-    State(pool): State<Arc<Pool<Postgres>>>,
+    State(state): State<Arc<AppState>>,
     Path(user_id): Path<String>,
 ) -> MetaResponse {
-    let result = delete_user(&user_id, &pool).await;
+    let result = delete_user(&user_id, &state.pool).await;
     match result {
         Ok(_) => MetaResponse {
             code: StatusCode::OK.to_i32(),
@@ -137,15 +139,17 @@ mod tests_user {
     use http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    use crate::auth::{
-        handler::{
-            NewUser, UpdatePasswordParam, add_user_handler, delete_user_handler, get_users_handler,
-            update_password_handler,
-        },
-        util::random_name,
-    };
     use crate::config::connection::ConnectionBuilder;
-    use sqlx::{Pool, Postgres};
+    use crate::{
+        AppState,
+        auth::{
+            handler::{
+                NewUser, UpdatePasswordParam, add_user_handler, delete_user_handler,
+                get_users_handler, update_password_handler,
+            },
+            util::random_name,
+        },
+    };
     use std::{sync::Arc, usize};
 
     #[tokio::test]
@@ -155,7 +159,9 @@ mod tests_user {
             .await
             .expect("Failed to connect to database");
 
-        let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
+        let db_state = Arc::new(AppState {
+            pool: Arc::new(pool),
+        });
 
         let app = Router::new()
             .route("/api/users", post(add_user_handler))
@@ -179,7 +185,9 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
+        let db_state = Arc::new(AppState {
+            pool: Arc::new(pool),
+        });
 
         let app = Router::new()
             .route("/api/users", post(add_user_handler))
@@ -206,7 +214,9 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
+        let db_state = Arc::new(AppState {
+            pool: Arc::new(pool),
+        });
 
         let app = Router::new()
             .route("/api/users", get(get_users_handler))
@@ -224,7 +234,9 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
+        let db_state = Arc::new(AppState {
+            pool: Arc::new(pool),
+        });
 
         let app = Router::new()
             .route("/api/users", post(add_user_handler))
@@ -271,7 +283,9 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
+        let db_state = Arc::new(AppState {
+            pool: Arc::new(pool),
+        });
 
         let app = Router::new()
             .route("/api/users", post(add_user_handler))

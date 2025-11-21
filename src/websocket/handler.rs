@@ -20,7 +20,7 @@ use serde::Deserialize;
 use sqlx::{Pool, Postgres, Row, postgres::PgRow};
 use std::sync::Arc;
 
-use crate::auth::user::User;
+use crate::{AppState, auth::user::User};
 
 /// Query parameter struct for WebSocket connection
 ///
@@ -55,9 +55,9 @@ pub struct WsQuery {
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     Query(query): Query<WsQuery>,
-    State(pool): State<Arc<Pool<Postgres>>>,
+    State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let user_exists = validate_user(&query.user_id, &pool).await;
+    let user_exists = validate_user(&query.user_id, &state.pool).await;
     match user_exists {
         Some(user) => ws.on_upgrade(move |socket| handle_socket(socket, query.user_id, user)),
         None => {

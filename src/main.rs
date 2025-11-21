@@ -15,6 +15,11 @@ use auth::handler::{
 };
 use sqlx::{Pool, Postgres};
 
+#[derive(Clone)]
+pub struct AppState {
+    pub pool: Arc<Pool<Postgres>>,
+}
+
 #[tokio::main]
 async fn main() {
     let builder = ConnectionBuilder(String::from("dev.toml"));
@@ -23,7 +28,9 @@ async fn main() {
         .expect("Failed to connect to database");
     let tcp = ConnectionBuilder::listen_on(&builder).expect("Failed to execute environment");
 
-    let db_state: Arc<Pool<Postgres>> = Arc::new(pool);
+    let state = Arc::new(AppState {
+        pool: Arc::new(pool),
+    });
 
     let user_route = Router::new()
         .route("/api/users", post(add_user_handler))
@@ -32,10 +39,11 @@ async fn main() {
         .route("/api/users/{user_id}", delete(delete_user_handler));
 
     let ws_route = Router::new().route("/ws", get(ws_handler));
+
     let app = Router::new()
         .merge(user_route)
         .merge(ws_route)
-        .with_state(db_state);
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", tcp.ip, tcp.port))
         .await
