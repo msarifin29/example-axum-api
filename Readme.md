@@ -150,45 +150,10 @@ curl -X POST http://127.0.0.1:3000/api/users \
 Note the returned `user_id` from the response. Then connect to WebSocket:
 
 ```bash
-# Install wscat if you don't have it
-npm install -g wscat
-
-# Connect to WebSocket (replace USER_ID with the actual user_id)
-wscat -c "ws://127.0.0.1:3000/ws?user_id=YOUR_USER_ID"
-
-# Once connected, you can type messages:
-# > hello world
-# < {"data":"User { user_id: \"...\", user_name: \"alice\", email: \"alice@example.com\" }","message":"hello world"}
-
-Or using crate websocat
-# cargo install websocat
+# Install websocat
+cargo install websocat
 
 websocat ws://localhost:3000/ws?user_id=YOUR_USER_ID
-```
-
-### Example: Connect with JavaScript/Node.js
-
-```javascript
-// Simple WebSocket client example
-const userId = "your-user-id-here";
-const ws = new WebSocket(`ws://127.0.0.1:3000/ws?user_id=${userId}`);
-
-ws.onopen = () => {
-  console.log("Connected to WebSocket!");
-  ws.send("Hello from client!");
-};
-
-ws.onmessage = (event) => {
-  console.log("Message from server:", event.data);
-};
-
-ws.onerror = (error) => {
-  console.error("WebSocket error:", error);
-};
-
-ws.onclose = () => {
-  console.log("WebSocket connection closed");
-};
 ```
 
 ### Message Types Handled
@@ -203,6 +168,86 @@ ws.onclose = () => {
 For detailed implementation, see:
 - `src/websocket/handler.rs` — WebSocket handler logic with full documentation
 - `src/websocket/mod.rs` — Route registration
+
+## Private Chat (End-to-End)
+
+The project includes a **private messaging feature** for real-time chat between two users. See `src/websocket/chat.rs` for the implementation.
+
+**Private Chat Route:** `ws://localhost:3000/ws/chat?sender_id={sender_id}&receiver_id={receiver_id}`
+
+### How Private Chat Works
+
+1. **Two users connect** with their `sender_id` and `receiver_id` query parameters.
+2. **Both users must exist** in the database (server validates both user_ids).
+3. **Broadcast channels** route messages between connected users in real-time.
+4. **Message format**: JSON with sender_id, receiver_id, message, and timestamp.
+5. **Connection tracking**: Each active connection is registered in a HashMap for efficient routing.
+
+### End-to-End Chat Testing
+
+#### Step 1: Create two test users
+
+```bash
+# Create first user (Michael)
+USER1=$(curl -s -X POST http://127.0.0.1:3000/api/users \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "user_name=michael&email=michael@example.com&password=pass123" | jq -r '.data.user_id')
+
+echo "Michael user_id: $USER1"
+
+# Create second user (Marley)
+USER2=$(curl -s -X POST http://127.0.0.1:3000/api/users \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "user_name=marley&email=marley@example.com&password=pass123" | jq -r '.data.user_id')
+
+echo "Marley user_id: $USER2"
+```
+
+#### Step 2: Open two terminal windows for testing
+
+**Terminal 1 (Alice connects to chat):**
+
+```bash
+websocat "ws://localhost:3000/ws/chat?sender_id=$USER1&receiver_id=$USER2"
+```
+
+**Terminal 2 (Bob connects to chat):**
+
+```bash
+websocat "ws://localhost:3000/ws/chat?sender_id=$USER2&receiver_id=$USER1"
+```
+
+#### Step 3: Send messages
+
+In **Terminal 1**, type a message (Alice sends to Bob):
+```
+> Hello Bob, how are you?
+```
+
+You'll see in **Terminal 2** (Bob receives):
+```
+< {"sender_id":"<USER1>","receiver_id":"<USER2>","message":"Hello Bob, how are you?","timestamp":1700XXX}
+```
+
+In **Terminal 2**, Bob replies (Bob sends to Alice):
+```
+> Hi Alice! I'm doing great!
+```
+
+You'll see in **Terminal 1** (Alice receives):
+```
+< {"sender_id":"<USER2>","receiver_id":"<USER1>","message":"Hi Alice! I'm doing great!","timestamp":1700XXX}
+```
+
+### Private Chat Implementation Details
+
+- **Location**: `src/websocket/chat.rs`
+- **State Management**: `PrivateChatState` tracks active connections per user using broadcast channels
+- **Routing**: `send_to_user()` looks up receiver in active connections and broadcasts message
+- **Error Handling**: Returns JSON error if message serialization fails
+- **Connection Cleanup**: Removes user from connections map on disconnect
+
+For implementation details and documentation, see `src/websocket/chat.rs`.
 
 ## Tests
 
@@ -228,14 +273,3 @@ If you prefer to run tests without hitting your real DB, consider spinning up a 
 - Port already in use: change `tcp.port` in `dev.toml`.
 - If tests fail due to DB state, re-create DB or run migration SQL files again.
 
----
-
-If you want, I can also:
-
-- add a `Makefile`/`justfile` with run/test commands,
-- add a small Docker Compose file with Postgres for local dev,
-- or wire up sqlx migrations and a script to run them automatically.
-
----
-
-Happy hacking!
