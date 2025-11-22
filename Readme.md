@@ -42,20 +42,6 @@ This project reads configuration from a TOML file (`dev.toml` by default). Examp
   port=3000
   ```
 
-Notes:
-
-- The application uses `Configure::build("dev.toml")` so the file name must match the one passed to `ConnectionBuilder` (the code uses `dev.toml`).
-- The `dev.toml` contains both DB and TCP settings. The app will bind to the configured `tcp.ip` / `tcp.port`.
-- If you encounter issues with environment variables, you can manually export them using the following commands:
-  Unix/Linux/macOS
-  ```bash
-  export DATABASE_URL=$(awk -F'"' '/url=/ {print $2}' dev.toml)
-  ```
-  windows
-  ```bash
-  set DATABASE_URL=$(awk -F'"' '/url=/ {print $2}' dev.toml)
-  ```
-
 ## Database and migrations
 
 The repo includes SQL files in `migrations/` (e.g. `20251114143622_user.up.sql`) — apply them to your database before running the app.
