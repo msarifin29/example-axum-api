@@ -13,6 +13,7 @@ use crate::{
     config::{connection::ConnectionBuilder, flavor::load_config},
     websocket::{
         chat::{PrivateChatState, private_chat_handler},
+        group::{GroupState, group_chat_handler},
         handler::ws_handler,
     },
 };
@@ -25,6 +26,7 @@ use sqlx::{Pool, Postgres};
 pub struct AppState {
     pub pool: Arc<Pool<Postgres>>,
     pub chat: Arc<PrivateChatState>,
+    pub group: Arc<GroupState>,
 }
 
 #[tokio::main]
@@ -39,6 +41,7 @@ async fn main() {
     let state = Arc::new(AppState {
         pool: Arc::new(pool),
         chat: Arc::new(PrivateChatState::new()),
+        group: Arc::new(GroupState::new()),
     });
 
     let user_route = Router::new()
@@ -49,7 +52,8 @@ async fn main() {
 
     let ws_route = Router::new()
         .route("/ws", get(ws_handler))
-        .route("/ws/chat", get(private_chat_handler));
+        .route("/ws/chat", get(private_chat_handler))
+        .route("/ws/group", get(group_chat_handler));
 
     let app = Router::new()
         .merge(user_route)

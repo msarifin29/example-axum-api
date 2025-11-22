@@ -140,7 +140,7 @@ mod tests_user {
     use tower::ServiceExt;
 
     use crate::config::connection::ConnectionBuilder;
-    use crate::websocket::chat::PrivateChatState;
+    use crate::websocket::{chat::PrivateChatState, group::GroupState};
     use crate::{
         AppState,
         auth::{
@@ -163,6 +163,7 @@ mod tests_user {
         let db_state = Arc::new(AppState {
             pool: Arc::new(pool),
             chat: Arc::new(PrivateChatState::new()),
+            group: Arc::new(GroupState::new()),
         });
 
         let app = Router::new()
@@ -190,6 +191,7 @@ mod tests_user {
         let db_state = Arc::new(AppState {
             pool: Arc::new(pool),
             chat: Arc::new(PrivateChatState::new()),
+            group: Arc::new(GroupState::new()),
         });
 
         let app = Router::new()
@@ -220,6 +222,7 @@ mod tests_user {
         let db_state = Arc::new(AppState {
             pool: Arc::new(pool),
             chat: Arc::new(PrivateChatState::new()),
+            group: Arc::new(GroupState::new()),
         });
 
         let app = Router::new()
@@ -241,6 +244,7 @@ mod tests_user {
         let db_state = Arc::new(AppState {
             pool: Arc::new(pool),
             chat: Arc::new(PrivateChatState::new()),
+            group: Arc::new(GroupState::new()),
         });
 
         let app = Router::new()
@@ -291,6 +295,7 @@ mod tests_user {
         let db_state = Arc::new(AppState {
             pool: Arc::new(pool),
             chat: Arc::new(PrivateChatState::new()),
+            group: Arc::new(GroupState::new()),
         });
 
         let app = Router::new()
