@@ -10,7 +10,7 @@ use axum::{
 };
 
 use crate::{
-    config::connection::ConnectionBuilder,
+    config::{connection::ConnectionBuilder, flavor::load_config},
     websocket::{
         chat::{PrivateChatState, private_chat_handler},
         handler::ws_handler,
@@ -29,7 +29,8 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
-    let builder = ConnectionBuilder(String::from("dev.toml"));
+    let flavor = load_config().expect("Failed to load configuration");
+    let builder = ConnectionBuilder(flavor);
     let pool = ConnectionBuilder::new(&builder)
         .await
         .expect("Failed to connect to database");
