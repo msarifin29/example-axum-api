@@ -140,7 +140,6 @@ mod tests_user {
     use tower::ServiceExt;
 
     use crate::config::connection::ConnectionBuilder;
-    use crate::websocket::{chat::PrivateChatState, group::GroupState};
     use crate::{
         AppState,
         auth::{
@@ -160,11 +159,7 @@ mod tests_user {
             .await
             .expect("Failed to connect to database");
 
-        let db_state = Arc::new(AppState {
-            pool: Arc::new(pool),
-            chat: Arc::new(PrivateChatState::new()),
-            group: Arc::new(GroupState::new()),
-        });
+        let db_state = Arc::new(AppState::new(pool));
 
         let app = Router::new()
             .route("/api/users", post(add_user_handler))
@@ -188,11 +183,7 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state = Arc::new(AppState {
-            pool: Arc::new(pool),
-            chat: Arc::new(PrivateChatState::new()),
-            group: Arc::new(GroupState::new()),
-        });
+        let db_state = Arc::new(AppState::new(pool));
 
         let app = Router::new()
             .route("/api/users", post(add_user_handler))
@@ -219,11 +210,7 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state = Arc::new(AppState {
-            pool: Arc::new(pool),
-            chat: Arc::new(PrivateChatState::new()),
-            group: Arc::new(GroupState::new()),
-        });
+        let db_state = Arc::new(AppState::new(pool));
 
         let app = Router::new()
             .route("/api/users", get(get_users_handler))
@@ -241,11 +228,7 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state = Arc::new(AppState {
-            pool: Arc::new(pool),
-            chat: Arc::new(PrivateChatState::new()),
-            group: Arc::new(GroupState::new()),
-        });
+        let db_state = Arc::new(AppState::new(pool));
 
         let app = Router::new()
             .route("/api/users", post(add_user_handler))
@@ -292,11 +275,7 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state = Arc::new(AppState {
-            pool: Arc::new(pool),
-            chat: Arc::new(PrivateChatState::new()),
-            group: Arc::new(GroupState::new()),
-        });
+        let db_state = Arc::new(AppState::new(pool));
 
         let app = Router::new()
             .route("/api/users", post(add_user_handler))

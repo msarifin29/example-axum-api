@@ -1,3 +1,4 @@
+mod app_state;
 mod auth;
 mod config;
 mod websocket;
@@ -10,24 +11,13 @@ use axum::{
 };
 
 use crate::{
+    app_state::AppState,
     config::{connection::ConnectionBuilder, flavor::load_config},
-    websocket::{
-        chat::{PrivateChatState, private_chat_handler},
-        group::{GroupState, group_chat_handler},
-        handler::ws_handler,
-    },
+    websocket::{chat::private_chat_handler, group::group_chat_handler, handler::ws_handler},
 };
 use auth::handler::{
     add_user_handler, delete_user_handler, get_users_handler, update_password_handler,
 };
-use sqlx::{Pool, Postgres};
-
-#[derive(Clone)]
-pub struct AppState {
-    pub pool: Arc<Pool<Postgres>>,
-    pub chat: Arc<PrivateChatState>,
-    pub group: Arc<GroupState>,
-}
 
 #[tokio::main]
 async fn main() {
@@ -38,11 +28,7 @@ async fn main() {
         .expect("Failed to connect to database");
     let tcp = ConnectionBuilder::listen_on(&builder).expect("Failed to execute environment");
 
-    let state = Arc::new(AppState {
-        pool: Arc::new(pool),
-        chat: Arc::new(PrivateChatState::new()),
-        group: Arc::new(GroupState::new()),
-    });
+    let state = Arc::new(AppState::new(pool));
 
     let user_route = Router::new()
         .route("/api/users", post(add_user_handler))
