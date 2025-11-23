@@ -1,0 +1,3 @@
+ALTER TABLE users ALTER COLUMN password TYPE VARCHAR(50);
+
+DROP INDEX IF EXISTS idx_users_user_name;
