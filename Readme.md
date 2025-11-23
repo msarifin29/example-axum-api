@@ -235,6 +235,140 @@ You'll see in **Terminal 1** (Alice receives):
 
 For implementation details and documentation, see `src/websocket/chat.rs`.
 
+## Group Chat
+
+The project includes a **multi-user group messaging feature** for real-time conversations among multiple users in a group. See `src/websocket/group.rs` for the WebSocket implementation and `src/group/handler.rs` for group management.
+
+**Group Chat Route:** `ws://localhost:3000/ws/group?user_id={user_id}&group_id={group_id}`
+
+### How Group Chat Works
+
+1. **User joins a group** with valid `user_id` and `group_id` query parameters.
+2. **Server validates** both the user and group exist in the database.
+3. **Broadcast channel** delivers all messages to ALL connected group members.
+4. **Message format**: JSON with user_name, message, and optional error handling.
+5. **Welcome notification**: When a user joins, a welcome message is broadcast to all members.
+6. **Scalable**: Single broadcast channel handles multiple concurrent connections efficiently.
+
+### Group Management API
+
+Before joining a group chat, create a group via REST API.
+
+#### Create a Group
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/groups \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "name=Tech_Enthusiasts&description=A group for tech discussions"
+```
+
+#### List All Groups
+
+```bash
+curl http://127.0.0.1:3000/api/groups/1
+```
+
+Returns paginated groups (10 per page, page 1).
+
+### End-to-End Group Chat Testing
+
+#### Step 1: Create users and a group
+
+```bash
+# Create users
+USER1=$(curl -s -X POST http://127.0.0.1:3000/api/users \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "user_name=alice&email=alice@example.com&password=pass123" | jq -r '.data.user_id')
+
+USER2=$(curl -s -X POST http://127.0.0.1:3000/api/users \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "user_name=bob&email=bob@example.com&password=pass123" | jq -r '.data.user_id')
+
+USER3=$(curl -s -X POST http://127.0.0.1:3000/api/users \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "user_name=charlie&email=charlie@example.com&password=pass123" | jq -r '.data.user_id')
+
+# Create group
+GROUP=$(curl -s -X POST http://127.0.0.1:3000/api/groups \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "name=DevChat&description=Developers chatting" | jq -r '.data.group_id')
+
+echo "Users: $USER1, $USER2, $USER3"
+echo "Group: $GROUP"
+```
+
+#### Step 2: Open three terminal windows for testing
+
+**Terminal 1 (Alice joins group):**
+```bash
+websocat "ws://localhost:3000/ws/group?user_id=$USER1&group_id=$GROUP"
+```
+
+**Terminal 2 (Bob joins group):**
+```bash
+websocat "ws://localhost:3000/ws/group?user_id=$USER2&group_id=$GROUP"
+```
+
+**Terminal 3 (Charlie joins group):**
+```bash
+websocat "ws://localhost:3000/ws/group?user_id=$USER3&group_id=$GROUP"
+```
+
+#### Step 3: Broadcast messages to all members
+
+In **Terminal 1** (Alice sends):
+```
+> Hello everyone! Welcome to the group chat!
+```
+
+All three terminals receive:
+```
+< {"user_name":"alice","message":"Hello everyone! Welcome to the group chat!"}
+```
+
+In **Terminal 2** (Bob replies):
+```
+> Hey Alice! Great to have a group chat feature!
+```
+
+All three terminals receive:
+```
+< {"user_name":"bob","message":"Hey Alice! Great to have a group chat feature!"}
+```
+
+In **Terminal 3** (Charlie joins in):
+```
+> This is awesome! Love the real-time updates!
+```
+
+All three terminals receive:
+```
+< {"user_name":"charlie","message":"This is awesome! Love the real-time updates!"}
+```
+
+### Group Chat Implementation Details
+
+- **WebSocket Handler**: `src/websocket/group.rs` — Manages group chat connections and message routing
+- **Group REST API**: `src/group/handler.rs` — CRUD operations for groups (create, list, get by ID)
+- **State Management**: `GroupState` with broadcast channel for pub/sub messaging
+- **Broadcast Channel**: Single `broadcast::Sender` delivers messages to all subscribed receivers
+- **Database**: Groups stored in PostgreSQL with name, description, and auto-generated UUID
+- **Connection Cleanup**: Graceful cleanup when user disconnects
+
+### Key Differences: Private Chat vs Group Chat
+
+| Feature | Private Chat | Group Chat |
+|---------|-------------|-----------|
+| **Participants** | 2 users (1-to-1) | Multiple users (N-to-N) |
+| **Message Routing** | HashMap lookup per receiver | Broadcast to all subscribers |
+| **Broadcast Channel** | Per-user channel | Single group channel |
+| **Connection Tracking** | HashMap of user→channel mappings | Single broadcast sender |
+| **Use Case** | Direct messaging | Team discussions, communities |
+
+For implementation details and documentation, see:
+- `src/websocket/group.rs` — WebSocket group chat handler
+- `src/group/handler.rs` — Group management API
+
 ## Tests
 
 - Unit & integration-like tests are present under `src/` using `tokio::test` and `axum_test`.
