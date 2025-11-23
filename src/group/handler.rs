@@ -172,7 +172,7 @@ mod tests_group {
 
     use crate::{
         app_state::AppState,
-        auth::util::random_name,
+        auth::{jwt::Secret, util::random_name},
         config::connection::ConnectionBuilder,
         group::handler::{GroupParam, create_group_handler, groups_handler},
     };
@@ -184,7 +184,8 @@ mod tests_group {
             .await
             .expect("Failed to connect database");
 
-        let state = Arc::new(AppState::new(pool));
+        let secret_key = Secret::new("dev.toml");
+        let state = Arc::new(AppState::new(pool, secret_key));
 
         let app = Router::new()
             .route("/api/groups", post(create_group_handler))
@@ -206,7 +207,8 @@ mod tests_group {
             .await
             .expect("Failed to connect database");
 
-        let state = Arc::new(AppState::new(pool));
+        let secret_key = Secret::new("dev.toml");
+        let state = Arc::new(AppState::new(pool, secret_key));
 
         let app = Router::new()
             .route("/api/groups/{page}", get(groups_handler))

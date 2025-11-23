@@ -1,6 +1,7 @@
 use crate::{
     AppState,
     auth::{
+        jwt::{create_access_token, create_refresh_token},
         user::{NewUser, User, UserResponse, add, delete_user, get_users, update_password},
         util::{MetaResponse, StatusCodeExt},
     },
@@ -15,11 +16,13 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(serde::Serialize)]
-pub struct SingleUserResponse {
+pub struct AuthResponse {
     pub meta: MetaResponse,
     pub data: User,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
 }
-impl IntoResponse for SingleUserResponse {
+impl IntoResponse for AuthResponse {
     fn into_response(self) -> Response {
         let status = StatusCode::from_u16(self.meta.code as u16).unwrap_or(StatusCode::OK);
 
@@ -47,21 +50,40 @@ impl IntoResponse for UsersResponse {
     }
 }
 
-pub async fn add_user_handler(
+pub async fn register_handler(
     State(state): State<Arc<AppState>>,
     Form(req): Form<NewUser>,
-) -> Result<SingleUserResponse, MetaResponse> {
+) -> Result<AuthResponse, MetaResponse> {
+    let sql = "select user_name from users where user_name = $1";
+    let existing = sqlx::query(sql)
+        .bind(req.user_name.clone())
+        .fetch_optional(state.pool.as_ref())
+        .await;
+
+    if let Ok(Some(_)) = existing {
+        MetaResponse {
+            code: StatusCode::BAD_REQUEST.to_i32(),
+            message: "User name already registered".to_string(),
+        };
+    }
+
     let result = add(&state.pool, req).await.map_err(|e| MetaResponse {
         code: StatusCode::BAD_REQUEST.to_i32(),
-        message: e.to_string(),
+        message: format!("Failed to register: {}", e.to_string()),
     })?;
 
-    Ok(SingleUserResponse {
+    let access_token = create_access_token(&state.jwt_config, &result.user_id, &result.email).ok();
+    let refresh_token =
+        create_refresh_token(&state.jwt_config, &result.user_id, &result.email).ok();
+
+    Ok(AuthResponse {
         meta: MetaResponse {
             code: StatusCode::OK.to_i32(),
             message: String::from("Success"),
         },
         data: result,
+        access_token: access_token,
+        refresh_token: refresh_token,
     })
 }
 
@@ -139,17 +161,17 @@ mod tests_user {
     use http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    use crate::config::connection::ConnectionBuilder;
     use crate::{
         AppState,
         auth::{
             handler::{
-                NewUser, UpdatePasswordParam, add_user_handler, delete_user_handler,
-                get_users_handler, update_password_handler,
+                NewUser, UpdatePasswordParam, delete_user_handler, get_users_handler,
+                register_handler, update_password_handler,
             },
             util::random_name,
         },
     };
+    use crate::{auth::jwt::Secret, config::connection::ConnectionBuilder};
     use std::{sync::Arc, usize};
 
     #[tokio::test]
@@ -159,10 +181,11 @@ mod tests_user {
             .await
             .expect("Failed to connect to database");
 
-        let db_state = Arc::new(AppState::new(pool));
+        let secret_key = Secret::new("dev.toml");
+        let db_state = Arc::new(AppState::new(pool, secret_key));
 
         let app = Router::new()
-            .route("/api/users", post(add_user_handler))
+            .route("/api/auth/register", post(register_handler))
             .with_state(db_state);
 
         let server = TestServer::new(app).unwrap();
@@ -173,7 +196,7 @@ mod tests_user {
             email: email,
             password: "123456".to_string(),
         };
-        let response = server.post("/api/users").form(&body).await;
+        let response = server.post("/api/auth/register").form(&body).await;
         response.assert_status_ok();
     }
 
@@ -183,10 +206,12 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state = Arc::new(AppState::new(pool));
+
+        let secret_key = Secret::new("dev.toml");
+        let db_state = Arc::new(AppState::new(pool, secret_key));
 
         let app = Router::new()
-            .route("/api/users", post(add_user_handler))
+            .route("/api/auth/register", post(register_handler))
             .with_state(db_state);
 
         let server = TestServer::new(app).unwrap();
@@ -197,10 +222,10 @@ mod tests_user {
             email: email,
             password: "123456".to_string(),
         };
-        let response = server.post("/api/users").form(&body).await;
+        let response = server.post("/api/auth/register").form(&body).await;
         response.assert_status_ok();
 
-        let response = server.post("/api/users").form(&body).await;
+        let response = server.post("/api/auth/register").form(&body).await;
         response.assert_status_bad_request();
     }
 
@@ -210,7 +235,9 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state = Arc::new(AppState::new(pool));
+
+        let secret_key = Secret::new("dev.toml");
+        let db_state = Arc::new(AppState::new(pool, secret_key));
 
         let app = Router::new()
             .route("/api/users", get(get_users_handler))
@@ -228,10 +255,12 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state = Arc::new(AppState::new(pool));
+
+        let secret_key = Secret::new("dev.toml");
+        let db_state = Arc::new(AppState::new(pool, secret_key));
 
         let app = Router::new()
-            .route("/api/users", post(add_user_handler))
+            .route("/api/users", post(register_handler))
             .route("/api/users", put(update_password_handler))
             .with_state(db_state);
 
@@ -275,10 +304,12 @@ mod tests_user {
         let pool = ConnectionBuilder::new(&builder)
             .await
             .expect("Failed to connect to database");
-        let db_state = Arc::new(AppState::new(pool));
+
+        let secret_key = Secret::new("dev.toml");
+        let db_state = Arc::new(AppState::new(pool, secret_key));
 
         let app = Router::new()
-            .route("/api/users", post(add_user_handler))
+            .route("/api/users", post(register_handler))
             .route("/api/users/{user_id}", delete(delete_user_handler))
             .with_state(db_state);
 
