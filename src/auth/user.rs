@@ -1,8 +1,10 @@
 use std::borrow::Cow;
 
 use crate::auth::util::{MsgError, hash_password, passwords_match};
-use axum::response::{IntoResponse, Json};
-use http::StatusCode;
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Json, Response},
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{Error, Pool, Postgres, Row, postgres::PgRow};
 use uuid::Uuid;
@@ -48,7 +50,22 @@ pub struct User {
 }
 
 impl IntoResponse for UserResponse {
-    fn into_response(self) -> axum::response::Response {
+    fn into_response(self) -> Response {
+        let status = StatusCode::OK;
+        (status, Json(self)).into_response()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UserInfo {
+    pub user_id: String,
+    pub user_name: String,
+    pub email: String,
+    pub password: String,
+}
+
+impl IntoResponse for UserInfo {
+    fn into_response(self) -> Response {
         let status = StatusCode::OK;
         (status, Json(self)).into_response()
     }
@@ -198,6 +215,25 @@ pub async fn delete_user(user_id: &str, pool: &Pool<Postgres>) -> Result<bool, E
 
     tx.commit().await?;
     Ok(true)
+}
+
+pub async fn get_by_user_name(user_name: String, pool: &Pool<Postgres>) -> Result<UserInfo, Error> {
+    let result =
+        sqlx::query("select user_id, user_name, email, password from users where user_name = $1")
+            .bind(user_name.to_string())
+            .map(|data: PgRow| UserInfo {
+                user_id: data.get("user_id"),
+                user_name: data.get("user_name"),
+                email: data.get("email"),
+                password: data.get("password"),
+            })
+            .fetch_optional(pool)
+            .await?;
+
+    match result {
+        Some(user) => Ok(user),
+        None => Err(Error::RowNotFound),
+    }
 }
 
 #[cfg(test)]

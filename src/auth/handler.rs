@@ -2,8 +2,11 @@ use crate::{
     AppState,
     auth::{
         jwt::{create_access_token, create_refresh_token},
-        user::{NewUser, User, UserResponse, add, delete_user, get_users, update_password},
-        util::{MetaResponse, StatusCodeExt},
+        user::{
+            NewUser, User, UserResponse, add, delete_user, get_by_user_name, get_users,
+            update_password,
+        },
+        util::{MetaResponse, StatusCodeExt, passwords_match},
     },
 };
 use axum::{
@@ -50,6 +53,12 @@ impl IntoResponse for UsersResponse {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoginParam {
+    pub user_name: String,
+    pub password: String,
+}
+
 pub async fn register_handler(
     State(state): State<Arc<AppState>>,
     Form(req): Form<NewUser>,
@@ -82,6 +91,45 @@ pub async fn register_handler(
             message: String::from("Success"),
         },
         data: result,
+        access_token: access_token,
+        refresh_token: refresh_token,
+    })
+}
+
+pub async fn login_handler(
+    State(state): State<Arc<AppState>>,
+    Form(req): Form<LoginParam>,
+) -> Result<AuthResponse, MetaResponse> {
+    let result = get_by_user_name(req.user_name, &state.pool)
+        .await
+        .map_err(|_| MetaResponse {
+            code: StatusCode::NOT_FOUND.to_i32(),
+            message: "Invalid user name or password".to_string(),
+        })?;
+
+    let is_err = passwords_match(&req.password, &result.password);
+    if let Err(_) = is_err {
+        MetaResponse {
+            code: StatusCode::NOT_FOUND.to_i32(),
+            message: "Invalid user name or password".to_string(),
+        };
+    }
+
+    let access_token = create_access_token(&state.jwt_config, &result.user_id, &result.email).ok();
+    let refresh_token =
+        create_refresh_token(&state.jwt_config, &result.user_id, &result.email).ok();
+
+    let data = User {
+        user_id: result.user_id,
+        user_name: result.user_name,
+        email: result.email,
+    };
+    Ok(AuthResponse {
+        meta: MetaResponse {
+            code: StatusCode::OK.to_i32(),
+            message: String::from("Success"),
+        },
+        data: data,
         access_token: access_token,
         refresh_token: refresh_token,
     })
@@ -165,8 +213,8 @@ mod tests_user {
         AppState,
         auth::{
             handler::{
-                NewUser, UpdatePasswordParam, delete_user_handler, get_users_handler,
-                register_handler, update_password_handler,
+                LoginParam, NewUser, UpdatePasswordParam, delete_user_handler, get_users_handler,
+                login_handler, register_handler, update_password_handler,
             },
             util::random_name,
         },
@@ -227,6 +275,54 @@ mod tests_user {
 
         let response = server.post("/api/auth/register").form(&body).await;
         response.assert_status_bad_request();
+    }
+
+    #[tokio::test]
+    async fn test_login_user() {
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder)
+            .await
+            .expect("Failed to connect to database");
+
+        let secret_key = Secret::new("dev.toml");
+        let db_state = Arc::new(AppState::new(pool, secret_key));
+
+        let app = Router::new()
+            .route("/api/auth/login", post(login_handler))
+            .with_state(db_state);
+
+        let server = TestServer::new(app).unwrap();
+
+        let body = LoginParam {
+            user_name: "Jordan".to_string(),
+            password: "123456".to_string(),
+        };
+        let response = server.post("/api/auth/login").form(&body).await;
+        response.assert_status_ok();
+    }
+
+    #[tokio::test]
+    async fn test_login_invalid_user_name() {
+        let builder = ConnectionBuilder(String::from("dev.toml"));
+        let pool = ConnectionBuilder::new(&builder)
+            .await
+            .expect("Failed to connect to database");
+
+        let secret_key = Secret::new("dev.toml");
+        let db_state = Arc::new(AppState::new(pool, secret_key));
+
+        let app = Router::new()
+            .route("/api/auth/login", post(login_handler))
+            .with_state(db_state);
+
+        let server = TestServer::new(app).unwrap();
+
+        let body = LoginParam {
+            user_name: "".to_string(),
+            password: "123456".to_string(),
+        };
+        let response = server.post("/api/auth/login").form(&body).await;
+        assert_eq!(response.status_code(),StatusCode::NOT_FOUND)
     }
 
     #[tokio::test]

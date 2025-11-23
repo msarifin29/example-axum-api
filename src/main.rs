@@ -21,7 +21,8 @@ use crate::{
     group::handler::{create_group_handler, groups_handler},
 };
 use auth::handler::{
-    delete_user_handler, get_users_handler, register_handler, update_password_handler,
+    delete_user_handler, get_users_handler, login_handler, register_handler,
+    update_password_handler,
 };
 
 #[tokio::main]
@@ -36,7 +37,9 @@ async fn main() {
     let secret_key = Secret::new(&flavor);
     let state = Arc::new(AppState::new(pool, secret_key));
 
-    let auth_route = Router::new().route("/api/auth/register", post(register_handler));
+    let auth_route = Router::new()
+        .route("/api/auth/register", post(register_handler))
+        .route("/api/auth/login", post(login_handler));
 
     let user_route = Router::new()
         .route("/api/users", get(get_users_handler))
