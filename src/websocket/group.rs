@@ -1,8 +1,6 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::sync::Arc;
 
+use crate::group::handler::{Group, get_by_id};
 use crate::{AppState, auth::user::User, websocket::handler::validate_user};
 use axum::{
     extract::{
@@ -31,7 +29,7 @@ pub struct GroupQuery {
 
 pub struct GroupState {
     pub tx: broadcast::Sender<String>,
-    pub users: Mutex<HashMap<String, String>>,
+    // pub users: Mutex<HashMap<String, String>>,
 }
 
 impl GroupState {
@@ -39,7 +37,7 @@ impl GroupState {
         let (tx, _rx) = broadcast::channel(100);
         Self {
             tx,
-            users: Mutex::new(HashMap::new()),
+            // users: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -50,11 +48,12 @@ pub async fn group_chat_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let user_id_exists = validate_user(&query.user_id, &state.pool).await;
+    let group_id_exists = get_by_id(&state.pool, &query.group_id).await;
 
-    match user_id_exists {
-        Some(user) => ws.on_upgrade(move |socket| {
-            group_chat(socket, user, query.group_id, state.group.clone())
-        }),
+    match (user_id_exists, group_id_exists) {
+        (Some(user), Some(group)) => {
+            ws.on_upgrade(move |socket| group_chat(socket, user, group, state.group.clone()))
+        }
         _ => Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .body("Unauthorized: Invalid user_id".into())
@@ -62,7 +61,7 @@ pub async fn group_chat_handler(
     }
 }
 
-pub async fn group_chat(ws: WebSocket, user: User, group_id: String, state: Arc<GroupState>) {
+pub async fn group_chat(ws: WebSocket, user: User, group: Group, state: Arc<GroupState>) {
     let (mut sender, mut receiver) = ws.split();
 
     let mut rx = state.tx.subscribe();
@@ -70,7 +69,7 @@ pub async fn group_chat(ws: WebSocket, user: User, group_id: String, state: Arc<
     let welcome_message = format!(
         r#"Welcome {} to Group {}"#,
         user.user_name.clone(),
-        group_id.clone(),
+        group.name.clone(),
     );
     let _ = state.tx.clone().send(welcome_message);
 

@@ -85,7 +85,7 @@ pub async fn create(pool: &Pool<Postgres>, name: &str, desc: &str) -> Result<Gro
     })
 }
 
-pub async fn get_by_id(pool: &Pool<Postgres>, group_id: &str) -> Result<Group, Error> {
+pub async fn get_by_id(pool: &Pool<Postgres>, group_id: &str) -> Option<Group> {
     let sql = "select group_id, name, description from groups where group_id = $1";
     let result = sqlx::query(sql)
         .bind(group_id)
@@ -95,16 +95,10 @@ pub async fn get_by_id(pool: &Pool<Postgres>, group_id: &str) -> Result<Group, E
             description: data.get("description"),
         })
         .fetch_optional(pool)
-        .await?;
+        .await
+        .unwrap_or_default();
 
-    match result {
-        Some(data) => Ok(Group {
-            group_id: data.group_id,
-            name: data.name.to_string(),
-            description: Some(data.description.unwrap_or_default()),
-        }),
-        None => Err(Error::RowNotFound),
-    }
+    result
 }
 
 pub async fn get_all(pool: &Pool<Postgres>, page: i32) -> Result<Vec<Group>, Error> {

@@ -39,7 +39,7 @@ async fn main() {
         .route("/api/users/{user_id}", delete(delete_user_handler));
 
     let group_route = Router::new()
-        .route("/api/groups", get(create_group_handler))
+        .route("/api/groups", post(create_group_handler))
         .route("/api/groups", get(groups_handler));
 
     let ws_route = Router::new()
