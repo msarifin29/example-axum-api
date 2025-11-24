@@ -1,6 +1,7 @@
 use crate::{
     AppState,
     auth::{
+        extractors::AuthUser,
         jwt::{create_access_token, create_refresh_token},
         user::{
             NewUser, User, UserResponse, add, delete_user, get_by_user_name, get_users,
@@ -11,7 +12,7 @@ use crate::{
 };
 use axum::{
     Form,
-    extract::{Path, Query, State},
+    extract::{Query, State},
     response::{IntoResponse, Json, Response},
 };
 use http::StatusCode;
@@ -159,15 +160,15 @@ pub async fn get_users_handler(
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdatePasswordParam {
-    pub user_id: String,
     pub password: String,
 }
 
 pub async fn update_password_handler(
+    AuthUser(user): AuthUser,
     State(state): State<Arc<AppState>>,
     Form(req): Form<UpdatePasswordParam>,
 ) -> MetaResponse {
-    let result = update_password(&req.user_id, &req.password, &state.pool).await;
+    let result = update_password(&user.user_id, &req.password, &state.pool).await;
     match result {
         Ok(_) => MetaResponse {
             code: StatusCode::OK.to_i32(),
@@ -181,10 +182,10 @@ pub async fn update_password_handler(
 }
 
 pub async fn delete_user_handler(
+    AuthUser(user): AuthUser,
     State(state): State<Arc<AppState>>,
-    Path(user_id): Path<String>,
 ) -> MetaResponse {
-    let result = delete_user(&user_id, &state.pool).await;
+    let result = delete_user(&user.user_id, &state.pool).await;
     match result {
         Ok(_) => MetaResponse {
             code: StatusCode::OK.to_i32(),
@@ -201,42 +202,69 @@ pub async fn delete_user_handler(
 mod tests_user {
     use axum_test::TestServer;
 
-    use axum::{
-        Router,
-        body::Body,
-        routing::{delete, get, post, put},
-    };
-    use http::{Request, StatusCode};
+    use axum::{Router, body::Body, http::StatusCode};
+    use http::Request;
     use tower::ServiceExt;
 
     use crate::{
         AppState,
         auth::{
-            handler::{
-                LoginParam, NewUser, UpdatePasswordParam, delete_user_handler, get_users_handler,
-                login_handler, register_handler, update_password_handler,
-            },
+            handler::{LoginParam, NewUser, UpdatePasswordParam},
             util::random_name,
         },
+        routes::routes,
     };
-    use crate::{auth::jwt::Secret, config::connection::ConnectionBuilder};
     use std::{sync::Arc, usize};
 
-    #[tokio::test]
-    async fn test_add_user() {
-        let builder = ConnectionBuilder(String::from("dev.toml"));
-        let pool = ConnectionBuilder::new(&builder)
+    pub async fn get_access_token(app: &Router, user_name: &str, password: &str) -> Option<String> {
+        let body = LoginParam {
+            user_name: user_name.to_string(),
+            password: password.to_string(),
+        };
+
+        let server = TestServer::new(app.clone()).unwrap();
+
+        let response = server.post("/api/auth/login").form(&body).await;
+        response.assert_status_ok();
+
+        let form_data = format!("user_name={}&password={}", user_name, password);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(form_data))
+            .expect("Failed request response");
+
+        let response = app
+            .clone()
+            .oneshot(request)
             .await
-            .expect("Failed to connect to database");
+            .expect("Failed call request");
+        assert_eq!(response.status(), StatusCode::OK);
 
-        let secret_key = Secret::new("dev.toml");
-        let db_state = Arc::new(AppState::new(pool, secret_key));
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("Failed convert to bytes");
 
-        let app = Router::new()
-            .route("/api/auth/register", post(register_handler))
-            .with_state(db_state);
+        let login_response: serde_json::Value =
+            serde_json::from_slice(&body).expect("Failed to convert serde json");
+
+        let token = login_response["access_token"]
+            .as_str()
+            .expect("failed to get access token");
+
+        Some(token.to_string())
+    }
+
+    #[tokio::test]
+    async fn test_register_user() {
+        let state = Arc::new(AppState::test().await);
+
+        let app = routes(state);
 
         let server = TestServer::new(app).unwrap();
+
         let user_name = random_name().to_string();
         let email = format!("{}.example.@mail.com", user_name.clone());
         let body = NewUser {
@@ -249,29 +277,19 @@ mod tests_user {
     }
 
     #[tokio::test]
-    async fn test_add_user_duplicate_username() {
-        let builder = ConnectionBuilder(String::from("dev.toml"));
-        let pool = ConnectionBuilder::new(&builder)
-            .await
-            .expect("Failed to connect to database");
+    async fn test_register_duplicate_username() {
+        let state = Arc::new(AppState::test().await);
 
-        let secret_key = Secret::new("dev.toml");
-        let db_state = Arc::new(AppState::new(pool, secret_key));
-
-        let app = Router::new()
-            .route("/api/auth/register", post(register_handler))
-            .with_state(db_state);
+        let app = routes(state);
 
         let server = TestServer::new(app).unwrap();
-        let user_name = random_name().to_string();
+        let user_name = "Jordan".to_string();
         let email = format!("{}.example.@mail.com", user_name.clone());
         let body = NewUser {
             user_name: user_name,
             email: email,
             password: "123456".to_string(),
         };
-        let response = server.post("/api/auth/register").form(&body).await;
-        response.assert_status_ok();
 
         let response = server.post("/api/auth/register").form(&body).await;
         response.assert_status_bad_request();
@@ -279,17 +297,9 @@ mod tests_user {
 
     #[tokio::test]
     async fn test_login_user() {
-        let builder = ConnectionBuilder(String::from("dev.toml"));
-        let pool = ConnectionBuilder::new(&builder)
-            .await
-            .expect("Failed to connect to database");
+        let state = Arc::new(AppState::test().await);
 
-        let secret_key = Secret::new("dev.toml");
-        let db_state = Arc::new(AppState::new(pool, secret_key));
-
-        let app = Router::new()
-            .route("/api/auth/login", post(login_handler))
-            .with_state(db_state);
+        let app = routes(state);
 
         let server = TestServer::new(app).unwrap();
 
@@ -303,17 +313,9 @@ mod tests_user {
 
     #[tokio::test]
     async fn test_login_invalid_user_name() {
-        let builder = ConnectionBuilder(String::from("dev.toml"));
-        let pool = ConnectionBuilder::new(&builder)
-            .await
-            .expect("Failed to connect to database");
+        let state = Arc::new(AppState::test().await);
 
-        let secret_key = Secret::new("dev.toml");
-        let db_state = Arc::new(AppState::new(pool, secret_key));
-
-        let app = Router::new()
-            .route("/api/auth/login", post(login_handler))
-            .with_state(db_state);
+        let app = routes(state);
 
         let server = TestServer::new(app).unwrap();
 
@@ -322,117 +324,158 @@ mod tests_user {
             password: "123456".to_string(),
         };
         let response = server.post("/api/auth/login").form(&body).await;
-        assert_eq!(response.status_code(),StatusCode::NOT_FOUND)
+        assert_eq!(response.status_code(), StatusCode::NOT_FOUND)
     }
 
     #[tokio::test]
     async fn test_get_users() {
-        let builder = ConnectionBuilder(String::from("dev.toml"));
-        let pool = ConnectionBuilder::new(&builder)
-            .await
-            .expect("Failed to connect to database");
+        let state = Arc::new(AppState::test().await);
 
-        let secret_key = Secret::new("dev.toml");
-        let db_state = Arc::new(AppState::new(pool, secret_key));
+        let app = routes(state);
 
-        let app = Router::new()
-            .route("/api/users", get(get_users_handler))
-            .with_state(db_state);
+        let server = TestServer::new(app.clone()).unwrap();
 
-        let server = TestServer::new(app).unwrap();
+        let user_name = "Jordan".to_string();
+        let password = "123456".to_string();
+        let token = get_access_token(&app, &user_name, &password).await.unwrap();
 
-        let response = server.get("/api/users?page=1&user_name=J").await;
+        let response = server
+            .get("/api/users?page=1")
+            .add_header("Authorization", format!("Bearer {}", token))
+            .await;
         response.assert_status_ok();
     }
 
     #[tokio::test]
-    async fn test_update_password() {
-        let builder = ConnectionBuilder(String::from("dev.toml"));
-        let pool = ConnectionBuilder::new(&builder)
-            .await
-            .expect("Failed to connect to database");
+    async fn test_get_users_by_name() {
+        let state = Arc::new(AppState::test().await);
 
-        let secret_key = Secret::new("dev.toml");
-        let db_state = Arc::new(AppState::new(pool, secret_key));
-
-        let app = Router::new()
-            .route("/api/users", post(register_handler))
-            .route("/api/users", put(update_password_handler))
-            .with_state(db_state);
+        let app = routes(state);
 
         let server = TestServer::new(app.clone()).unwrap();
-        let name = random_name().to_string();
-        let form_data = format!(
-            "user_name={}&email={}@example.com&password=pass123",
-            name, name
-        );
-        let request = Request::builder()
-            .method("POST")
-            .uri("/api/users")
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(Body::from(form_data))
-            .unwrap();
 
-        let response = app.clone().oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        let user_name = "Jordan".to_string();
+        let password = "123456".to_string();
+        let token = get_access_token(&app, &user_name, &password).await.unwrap();
 
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        let response = server
+            .get("/api/users?page=1&user_name=x")
+            .add_header("Authorization", format!("Bearer {}", token))
+            .await;
+        response.assert_status_ok();
+    }
+
+    #[tokio::test]
+    async fn test_get_users_unauthorized() {
+        let state = Arc::new(AppState::test().await);
+
+        let app = routes(state);
+
+        let server = TestServer::new(app.clone()).unwrap();
+
+        let response = server
+            .get("/api/users?page=1&user_name=x")
+            .add_header("Authorization", format!("Bearer {}", "token"))
+            .await;
+        response.assert_status_unauthorized();
+    }
+
+    #[tokio::test]
+    async fn test_update_password() {
+        let state = Arc::new(AppState::test().await);
+
+        let app = routes(state);
+
+        let server = TestServer::new(app.clone()).unwrap();
+
+        let user_name = random_name().to_string();
+        let email = format!("{}.example.@mail.com", user_name.clone());
+        let password = "123456".to_string();
+        let body = NewUser {
+            user_name: user_name.clone(),
+            email: email,
+            password: password.clone(),
+        };
+
+        let response = server.post("/api/auth/register").form(&body).await;
+        assert_eq!(response.status_code(), StatusCode::OK);
+
+        let new_password = random_name().to_string();
+        let token = get_access_token(&app.clone(), &user_name, &password)
             .await
             .unwrap();
 
-        let create_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
-
-        let user_id = create_response["data"]["user_id"]
-            .as_str()
-            .expect("user_id not found");
-
         let param = UpdatePasswordParam {
-            user_id: user_id.to_string(),
-            password: "65431".to_string(),
+            password: new_password,
         };
-        let response = server.put("/api/users").form(&param).await;
+        let response = server
+            .put("/api/auth/update-password")
+            .add_header("Authorization", format!("Bearer {}", token))
+            .form(&param)
+            .await;
         assert_eq!(response.status_code(), StatusCode::OK);
     }
 
     #[tokio::test]
-    async fn test_delete_user() {
-        let builder = ConnectionBuilder(String::from("dev.toml"));
-        let pool = ConnectionBuilder::new(&builder)
-            .await
-            .expect("Failed to connect to database");
+    async fn test_update_password_failed() {
+        let state = Arc::new(AppState::test().await);
 
-        let secret_key = Secret::new("dev.toml");
-        let db_state = Arc::new(AppState::new(pool, secret_key));
-
-        let app = Router::new()
-            .route("/api/users", post(register_handler))
-            .route("/api/users/{user_id}", delete(delete_user_handler))
-            .with_state(db_state);
+        let app = routes(state);
 
         let server = TestServer::new(app.clone()).unwrap();
 
-        let form_data = "user_name=testdelete&email=crud@example.com&password=pass123";
-        let request = Request::builder()
-            .method("POST")
-            .uri("/api/users")
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(Body::from(form_data))
-            .unwrap();
+        let user_name = random_name().to_string();
+        let email = format!("{}.example.@mail.com", user_name.clone());
+        let password = "123456".to_string();
+        let body = NewUser {
+            user_name: user_name.clone(),
+            email: email,
+            password: password.clone(),
+        };
 
-        let response = app.clone().oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        let response = server.post("/api/auth/register").form(&body).await;
+        assert_eq!(response.status_code(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        let token = get_access_token(&app.clone(), &user_name, &password)
             .await
             .unwrap();
 
-        let create_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let param = UpdatePasswordParam { password: password };
+        let response = server
+            .put("/api/auth/update-password")
+            .add_header("Authorization", format!("Bearer {}", token))
+            .form(&param)
+            .await;
+        assert_eq!(response.status_code(), StatusCode::BAD_REQUEST);
+    }
 
-        let user_id = create_response["data"]["user_id"]
-            .as_str()
-            .expect("user_id not found");
-        let path = format!("/api/users/{}", user_id);
-        let response = server.delete(&path).await;
+    #[tokio::test]
+    async fn test_delete_user() {
+        let state = Arc::new(AppState::test().await);
+
+        let app = routes(state);
+        let server = TestServer::new(app.clone()).unwrap();
+
+        let user_name = random_name().to_string();
+        let email = format!("{}.example.@mail.com", user_name.clone());
+        let password = "123456".to_string();
+        let body = NewUser {
+            user_name: user_name.clone(),
+            email: email,
+            password: password.clone(),
+        };
+
+        let response = server.post("/api/auth/register").form(&body).await;
+        assert_eq!(response.status_code(), StatusCode::OK);
+
+        let token = get_access_token(&app.clone(), &user_name, &password)
+            .await
+            .unwrap();
+
+        let response = server
+            .delete("/api/auth/delete-account")
+            .add_header("Authorization", format!("Bearer {}", token))
+            .await;
         assert_eq!(response.status_code(), StatusCode::OK);
     }
 }

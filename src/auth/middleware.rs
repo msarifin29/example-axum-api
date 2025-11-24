@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Request, State},
     http::{StatusCode, header},
@@ -8,7 +10,7 @@ use axum::{
 use crate::{app_state::AppState, auth::jwt::verify_token};
 
 pub async fn auth_middleware(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, Response> {

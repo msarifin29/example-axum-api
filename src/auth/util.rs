@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as fmt_error,
     fmt::{self, Display},
+    sync::Arc,
 };
+
+use crate::{app_state::AppState, auth::jwt::Secret, config::connection::ConnectionBuilder};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MetaResponse {
     pub code: i32,
@@ -99,6 +102,25 @@ pub fn random_name() -> String {
             }
         })
         .collect()
+}
+
+impl AppState {
+    pub async fn test() -> Self {
+        let env_dev = String::from("dev.toml");
+        let builder = ConnectionBuilder(env_dev.clone());
+        let pool = ConnectionBuilder::new(&builder)
+            .await
+            .expect("Failed to connect to database");
+        let secret_key = Secret::new(&env_dev);
+        let state = Arc::new(AppState::new(pool, secret_key));
+
+        Self {
+            pool: state.pool.clone(),
+            chat: state.chat.clone(),
+            group: state.group.clone(),
+            jwt_config: state.jwt_config.clone(),
+        }
+    }
 }
 
 #[cfg(test)]

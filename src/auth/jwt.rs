@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
-pub struct Secret(pub String);
+pub struct Secret;
 impl Secret {
     pub fn new(env: &str) -> String {
         let configure = Configure::build(env).expect("Failed to load environment");

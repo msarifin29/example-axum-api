@@ -23,10 +23,16 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/api/auth/register", post(register_handler))
         .route("/api/auth/login", post(login_handler));
 
+    let auth_private_route = Router::new()
+        .route("/api/auth/update-password", put(update_password_handler))
+        .route("/api/auth/delete-account", delete(delete_user_handler))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
     let user_route = Router::new()
         .route("/api/users", get(get_users_handler))
-        .route("/api/users", put(update_password_handler))
-        .route("/api/users/{user_id}", delete(delete_user_handler))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -51,6 +57,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
 
     Router::new()
         .merge(auth_route)
+        .merge(auth_private_route)
         .merge(user_route)
         .merge(group_route)
         .merge(ws_route)
