@@ -48,8 +48,8 @@ pub fn routes(state: Arc<AppState>) -> Router {
 
     let ws_route = Router::new()
         .route("/ws", get(ws_handler))
-        .route("/ws/chat", get(private_chat_handler))
-        .route("/ws/group", get(group_chat_handler))
+        .route("/chat", get(private_chat_handler))
+        .route("/group-chat", get(group_chat_handler))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
