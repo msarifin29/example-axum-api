@@ -1,15 +1,19 @@
 use std::{collections::HashMap, sync::Arc, time};
 
-use crate::{AppState, websocket::handler::validate_user};
+use crate::{AppState, auth::extractors::AuthUser, websocket::handler::validate_user};
 use axum::{
     extract::{
-        Query, State, WebSocketUpgrade,
+        State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    response::{IntoResponse, Response},
+    http::{
+        StatusCode,
+        header::{AUTHORIZATION, HeaderMap, HeaderValue},
+    },
+    response::IntoResponse,
 };
 use futures::{SinkExt, StreamExt};
-use http::StatusCode;
+use http::HeaderName;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::{RwLock, broadcast};
@@ -20,12 +24,6 @@ pub struct ChatMessage {
     pub receiver_id: String,
     pub message: String,
     pub timestamp: u64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ChatQuery {
-    pub sender_id: String,
-    pub receiver_id: String,
 }
 
 pub struct PrivateChatState {
@@ -42,25 +40,51 @@ impl PrivateChatState {
 
 pub async fn private_chat_handler(
     ws: WebSocketUpgrade,
-    Query(query): Query<ChatQuery>,
+    AuthUser(user): AuthUser,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let sender_exists = validate_user(&query.sender_id, &state.pool).await;
-    let receiver_exists = validate_user(&query.receiver_id, &state.pool).await;
+    let sender_id = user.user_id;
+
+    let receiver_id = match headers.get("receiver_id") {
+        Some(v) => match v.to_str() {
+            Ok(id) => id.to_string(),
+            Err(_) => {
+                return (StatusCode::BAD_REQUEST, "Invalid recevier_id header format")
+                    .into_response();
+            }
+        },
+        None => {
+            return (StatusCode::BAD_REQUEST, "Missing receiver_id header").into_response();
+        }
+    };
+    let sender_exists = validate_user(&sender_id, &state.pool).await;
+    let receiver_exists = validate_user(&receiver_id, &state.pool).await;
+
+    let mut headers = HeaderMap::new();
+    let token = format!("Bearer {}", sender_id);
+    let header_value = HeaderValue::from_str(&token).expect("invalid header value");
+    headers.insert(AUTHORIZATION, header_value);
+
+    let receiver_header = HeaderValue::from_str(&receiver_id).expect("Invalid header value");
+    headers.insert(HeaderName::from_static("receiver_id"), receiver_header);
 
     match (sender_exists, receiver_exists) {
-        (Some(_), Some(_)) => ws.on_upgrade(move |socket| {
-            private_chat(
-                socket,
-                query.sender_id,
-                query.receiver_id,
-                state.chat.clone(),
-            )
-        }),
-        _ => Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .body("Unauthorized: Invalid user_id".into())
-            .unwrap(),
+        (Some(_), Some(_)) => (
+            headers.clone(),
+            ws.on_upgrade(move |socket| {
+                private_chat(socket, sender_id, receiver_id, state.chat.clone())
+            }),
+        )
+            .into_response(),
+        _ => {
+            let mut resp =
+                (StatusCode::BAD_REQUEST, "Invalid user_id or receiver_id").into_response();
+            for (k, v) in headers.iter() {
+                resp.headers_mut().append(k, v.clone());
+            }
+            resp
+        }
     }
 }
 
@@ -100,7 +124,7 @@ pub async fn private_chat(
                             &state_clone,
                             &sender_id_clone,
                             &receiver_id_clone.clone(),
-                            text.to_string(),
+                            text.as_str(),
                         )
                         .await;
                     }
@@ -127,18 +151,13 @@ pub async fn private_chat(
     }
 }
 
-pub async fn send_to_user(
-    state: &PrivateChatState,
-    sender_id: &str,
-    receiver_id: &str,
-    msg: String,
-) {
+pub async fn send_to_user(state: &PrivateChatState, sender_id: &str, receiver_id: &str, msg: &str) {
     let connections = state.connections.read().await;
     if let Some(tx) = connections.get(receiver_id) {
         let chat_message = ChatMessage {
             sender_id: sender_id.to_string(),
             receiver_id: receiver_id.to_string(),
-            message: msg.clone(),
+            message: msg.to_string(),
             timestamp: time::SystemTime::now()
                 .duration_since(time::UNIX_EPOCH)
                 .unwrap()
