@@ -40,7 +40,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
 
     let group_route = Router::new()
         .route("/api/groups", post(create_group_handler))
-        .route("/api/groups", get(groups_handler))
+        .route("/api/groups/{page}", get(groups_handler))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
