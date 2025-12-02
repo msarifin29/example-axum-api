@@ -5,7 +5,7 @@ use axum::{
     routing::{delete, get, post, put},
 };
 
-use crate::app_state::AppState;
+use crate::{app_state::AppState, auth::handler::refresh_token_handler};
 use crate::{
     auth::{
         handler::{
@@ -21,7 +21,8 @@ use crate::{
 pub fn routes(state: Arc<AppState>) -> Router {
     let auth_route = Router::new()
         .route("/api/auth/register", post(register_handler))
-        .route("/api/auth/login", post(login_handler));
+        .route("/api/auth/login", post(login_handler))
+        .route("/api/auth/refresh-token", post(refresh_token_handler));
 
     let auth_private_route = Router::new()
         .route("/api/auth/update-password", put(update_password_handler))

@@ -2,7 +2,7 @@ use crate::{
     AppState,
     auth::{
         extractors::AuthUser,
-        jwt::{create_access_token, create_refresh_token},
+        jwt::{create_access_token, create_refresh_token, verify_token},
         user::{
             NewUser, User, UserResponse, add, delete_user, get_by_user_name, get_users,
             update_password,
@@ -13,16 +13,16 @@ use crate::{
 use axum::{
     Form,
     extract::{Query, State},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Json, Response},
 };
-use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(serde::Serialize)]
 pub struct AuthResponse {
     pub meta: MetaResponse,
-    pub data: User,
+    pub data: Option<User>,
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
 }
@@ -91,7 +91,7 @@ pub async fn register_handler(
             code: StatusCode::OK.to_i32(),
             message: String::from("Success"),
         },
-        data: result,
+        data: Some(result),
         access_token: access_token,
         refresh_token: refresh_token,
     })
@@ -130,10 +130,53 @@ pub async fn login_handler(
             code: StatusCode::OK.to_i32(),
             message: String::from("Success"),
         },
-        data: data,
+        data: Some(data),
         access_token: access_token,
         refresh_token: refresh_token,
     })
+}
+
+pub async fn refresh_token_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<AuthResponse, MetaResponse> {
+    let refresh_token = match headers.get("refresh-token") {
+        Some(token) => match token.to_str() {
+            Ok(v) => Ok(v.to_string()),
+            Err(_) => Err(MetaResponse {
+                code: StatusCode::BAD_REQUEST.to_i32(),
+                message: "Invalid refresh token header format".to_string(),
+            }),
+        },
+        None => Err(MetaResponse {
+            code: StatusCode::BAD_REQUEST.to_i32(),
+            message: "Invalid or expired refresh token".to_string(),
+        }),
+    }?;
+
+    let mut header_map = HeaderMap::new();
+    let header_value = HeaderValue::from_str(&refresh_token).expect("Invalid header value");
+    header_map.insert(HeaderName::from_static("refresh-token"), header_value);
+
+    match verify_token(&state.jwt_config, &refresh_token) {
+        Ok(claims) => {
+            let access_token =
+                create_access_token(&state.jwt_config, &claims.user_id, &claims.email).ok();
+            Ok(AuthResponse {
+                meta: MetaResponse {
+                    code: StatusCode::OK.to_i32(),
+                    message: "Success".to_string(),
+                },
+                data: None,
+                access_token: access_token,
+                refresh_token: Some(refresh_token.to_string()),
+            })
+        }
+        Err(_) => Err(MetaResponse {
+            code: StatusCode::BAD_REQUEST.to_i32(),
+            message: "Invalid or expired refresh token".to_string(),
+        }),
+    }
 }
 
 pub async fn get_users_handler(
@@ -216,7 +259,11 @@ mod tests_user {
     };
     use std::{sync::Arc, usize};
 
-    pub async fn get_access_token(app: &Router, user_name: &str, password: &str) -> Option<String> {
+    pub async fn get_access_token(
+        app: &Router,
+        user_name: &str,
+        password: &str,
+    ) -> Option<(String, String)> {
         let body = LoginParam {
             user_name: user_name.to_string(),
             password: password.to_string(),
@@ -250,11 +297,14 @@ mod tests_user {
         let login_response: serde_json::Value =
             serde_json::from_slice(&body).expect("Failed to convert serde json");
 
-        let token = login_response["access_token"]
+        let access_token = login_response["access_token"]
             .as_str()
             .expect("failed to get access token");
+        let refresh_token = login_response["refresh_token"]
+            .as_str()
+            .expect("failed to get refresh token");
 
-        Some(token.to_string())
+        Some((access_token.to_string(), refresh_token.to_string()))
     }
 
     #[tokio::test]
@@ -312,6 +362,32 @@ mod tests_user {
     }
 
     #[tokio::test]
+    async fn test_refresh_token() {
+        let state = Arc::new(AppState::test().await);
+
+        let app = routes(state);
+
+        let server = TestServer::new(app.clone()).unwrap();
+
+        let user_name = "Jordan".to_string();
+        let password = "123456".to_string();
+        let body = LoginParam {
+            user_name: user_name.clone(),
+            password: password.clone(),
+        };
+        let response = server.post("/api/auth/login").form(&body).await;
+        response.assert_status_ok();
+
+        let (_, refresh) = get_access_token(&app, &user_name, &password).await.unwrap();
+
+        let response = server
+            .post("/api/auth/refresh-token")
+            .add_header("refresh-token", format!("{}", refresh))
+            .await;
+        response.assert_status_ok();
+    }
+
+    #[tokio::test]
     async fn test_login_invalid_user_name() {
         let state = Arc::new(AppState::test().await);
 
@@ -337,7 +413,7 @@ mod tests_user {
 
         let user_name = "Jordan".to_string();
         let password = "123456".to_string();
-        let token = get_access_token(&app, &user_name, &password).await.unwrap();
+        let (token, _) = get_access_token(&app, &user_name, &password).await.unwrap();
 
         let response = server
             .get("/api/users?page=1")
@@ -356,7 +432,7 @@ mod tests_user {
 
         let user_name = "Jordan".to_string();
         let password = "123456".to_string();
-        let token = get_access_token(&app, &user_name, &password).await.unwrap();
+        let (token, _) = get_access_token(&app, &user_name, &password).await.unwrap();
 
         let response = server
             .get("/api/users?page=1&user_name=x")
@@ -401,7 +477,7 @@ mod tests_user {
         assert_eq!(response.status_code(), StatusCode::OK);
 
         let new_password = random_name().to_string();
-        let token = get_access_token(&app.clone(), &user_name, &password)
+        let (token, _) = get_access_token(&app.clone(), &user_name, &password)
             .await
             .unwrap();
 
@@ -436,7 +512,7 @@ mod tests_user {
         let response = server.post("/api/auth/register").form(&body).await;
         assert_eq!(response.status_code(), StatusCode::OK);
 
-        let token = get_access_token(&app.clone(), &user_name, &password)
+        let (token, _) = get_access_token(&app.clone(), &user_name, &password)
             .await
             .unwrap();
 
@@ -468,7 +544,7 @@ mod tests_user {
         let response = server.post("/api/auth/register").form(&body).await;
         assert_eq!(response.status_code(), StatusCode::OK);
 
-        let token = get_access_token(&app.clone(), &user_name, &password)
+        let (token, _) = get_access_token(&app.clone(), &user_name, &password)
             .await
             .unwrap();
 
