@@ -14,6 +14,9 @@ use crate::{
     routes::routes,
 };
 
+use axum::http::{HeaderValue, Method, header};
+use tower_http::cors::CorsLayer;
+
 #[tokio::main]
 async fn main() {
     let flavor = load_config().expect("Failed to load configuration");
@@ -26,7 +29,18 @@ async fn main() {
     let secret_key = Secret::new(&flavor);
     let state = Arc::new(AppState::new(pool, secret_key));
 
-    let app = routes(state);
+    let cors = CorsLayer::new()
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION, header::ACCEPT])
+        .allow_credentials(true);
+
+    let app = routes(state).layer(cors);
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", tcp.ip, tcp.port))
         .await
