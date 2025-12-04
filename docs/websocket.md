@@ -72,7 +72,7 @@ websocat ws://127.0.0.1:3000/chat \
 Now type messages in Terminal A and they should appear in Terminal B as JSON messages like:
 
 ```json
-{"sender_id":"<USER1>","receiver_id":"<USER2>","message":"Hello Bob!","timestamp":1700XXXXX}
+{"sender_user":{"user_id":"<USER_ID>","user_name":"Alice","email":"alice@example.com"},"receiver_user":{"user_id":"<USER_ID>","user_name":"bobmarley","email":"bobmarley@example.com"},"message":"Hello Bob!\n","timestamp":1700XXXXX}
 ```
 
 And replies sent from Terminal B will appear in Terminal A.
