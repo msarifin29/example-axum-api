@@ -1,6 +1,10 @@
 use std::{collections::HashMap, sync::Arc, time};
 
-use crate::{AppState, auth::extractors::AuthUser, websocket::handler::validate_user};
+use crate::{
+    AppState,
+    auth::{extractors::AuthUser, user::User},
+    websocket::handler::validate_user,
+};
 use axum::{
     extract::{
         State, WebSocketUpgrade,
@@ -20,8 +24,8 @@ use tokio::sync::{RwLock, broadcast};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatMessage {
-    pub sender_id: String,
-    pub receiver_id: String,
+    pub sender_user: User,
+    pub receiver_user: User,
     pub message: String,
     pub timestamp: u64,
 }
@@ -70,11 +74,9 @@ pub async fn private_chat_handler(
     headers.insert(HeaderName::from_static("receiver_id"), receiver_header);
 
     match (sender_exists, receiver_exists) {
-        (Some(_), Some(_)) => (
+        (Some(sender), Some(receiver)) => (
             headers.clone(),
-            ws.on_upgrade(move |socket| {
-                private_chat(socket, sender_id, receiver_id, state.chat.clone())
-            }),
+            ws.on_upgrade(move |socket| private_chat(socket, sender, receiver, state.chat.clone())),
         )
             .into_response(),
         _ => {
@@ -90,8 +92,8 @@ pub async fn private_chat_handler(
 
 pub async fn private_chat(
     ws: WebSocket,
-    sender_id: String,
-    receiver_id: String,
+    sender_user: User,
+    receiver_user: User,
     state: Arc<PrivateChatState>,
 ) {
     let (mut sender, mut receiver) = ws.split();
@@ -100,7 +102,7 @@ pub async fn private_chat(
 
     {
         let mut connections = state.connections.write().await;
-        connections.insert(sender_id.clone(), tx.clone());
+        connections.insert(sender_user.user_id.clone(), tx.clone());
     }
 
     let mut send_task = tokio::spawn(async move {
@@ -112,21 +114,15 @@ pub async fn private_chat(
     });
 
     let state_clone = state.clone();
-    let sender_id_clone = sender_id.clone();
-    let receiver_id_clone = receiver_id.clone();
+    let sender_clone = sender_user.clone();
 
     let mut recv_task = tokio::spawn(async move {
         while let Some(msg) = receiver.next().await {
             if let Ok(msg) = msg {
                 match msg {
                     Message::Text(text) => {
-                        send_to_user(
-                            &state_clone,
-                            &sender_id_clone,
-                            &receiver_id_clone.clone(),
-                            text.as_str(),
-                        )
-                        .await;
+                        send_to_user(&state_clone, &sender_clone, &receiver_user, text.as_str())
+                            .await;
                     }
 
                     Message::Close(_) => {
@@ -147,34 +143,46 @@ pub async fn private_chat(
 
     {
         let mut connections = state.connections.write().await;
-        connections.remove(&sender_id.clone());
+        connections.remove(&sender_user.user_id.clone());
     }
 }
 
-pub async fn send_to_user(state: &PrivateChatState, sender_id: &str, receiver_id: &str, msg: &str) {
+pub async fn send_to_user(
+    state: &PrivateChatState,
+    sender_user: &User,
+    receiver_user: &User,
+    msg: &str,
+) {
     let connections = state.connections.read().await;
-    if let Some(tx) = connections.get(receiver_id) {
-        let chat_message = ChatMessage {
-            sender_id: sender_id.to_string(),
-            receiver_id: receiver_id.to_string(),
-            message: msg.to_string(),
-            timestamp: time::SystemTime::now()
-                .duration_since(time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        };
 
-        let response = match serde_json::to_string(&chat_message) {
-            Ok(json) => json,
-            Err(e) => json!({
-                "error": format!("Failed to serialize message: {}",e.to_string()),
-                "sender_id": sender_id,
-                "receiver_id": receiver_id,
-                "message": msg,
-            })
-            .to_string(),
-        };
+    if let Some(tx) = connections.get(&receiver_user.user_id) {
+        let response = json_msg(sender_user, receiver_user, msg);
 
         let _ = tx.send(response);
+    }
+    if let Some(tx) = connections.get(&sender_user.user_id) {
+        let response = json_msg(sender_user, receiver_user, msg);
+        let _ = tx.send(response);
+    }
+}
+
+fn json_msg(sender_user: &User, receiver_user: &User, msg: &str) -> String {
+    let seconds = time::SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let chat_message = ChatMessage {
+        sender_user: sender_user.clone(),
+        receiver_user: receiver_user.clone(),
+        message: msg.to_string(),
+        timestamp: seconds,
+    };
+
+    match serde_json::to_string(&chat_message) {
+        Ok(json) => json,
+        Err(e) => json!({
+            "error": format!("Failed to serialize message: {}",e.to_string())})
+        .to_string(),
     }
 }
